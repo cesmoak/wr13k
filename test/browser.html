@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>Sunwake Rush browser checks</title>
+<style>body{margin:0;background:#203f3c;color:#f3f4dc;font:12px monospace}header{height:72px;display:flex;align-items:center;padding:0 20px;gap:20px}button{padding:12px;border:0;background:#c7ff75;cursor:pointer}iframe{width:100%;height:calc(100vh - 72px);border:0}#report{white-space:pre-wrap;font-size:10px;max-width:70%;max-height:64px;overflow:auto}</style>
+<header><button id="run">Run keyboard + full race checks</button><button id="levels">Check speed levels</button><button id="interactions">Check collisions</button><button id="pacing">Check frame pacing</button><button id="modes">Check modes</button><span id="report">Ready. This harness is excluded from the production build.</span></header>
+<iframe id="frame" src="/" title="Game under test"></iframe>
+<script type="module">
+  const frame=document.getElementById('frame'),report=document.getElementById('report');
+  frame.onload=()=>{const script=frame.contentDocument.createElement('script');script.type='module';script.src='/test/browser-driver.js';frame.contentDocument.body.append(script);};
+  document.getElementById('run').onclick=()=>{frame.contentWindow.focus();frame.contentWindow.postMessage({prismTest:'start'},location.origin);};
+  document.getElementById('levels').onclick=()=>{frame.contentWindow.focus();frame.contentWindow.postMessage({prismTest:'levels'},location.origin);};
+  document.getElementById('interactions').onclick=()=>{frame.contentWindow.focus();frame.contentWindow.postMessage({prismTest:'interactions'},location.origin);};
+  document.getElementById('modes').onclick=()=>{frame.contentWindow.focus();frame.contentWindow.postMessage({prismTest:'modes'},location.origin);};
+  document.getElementById('pacing').onclick=()=>{frame.contentWindow.focus();frame.contentWindow.postMessage({prismTest:'pacing'},location.origin);};
+  window.addEventListener('message',e=>{if(e.origin===location.origin&&e.data.prismReport)report.textContent=e.data.prismReport;});
+</script></html>

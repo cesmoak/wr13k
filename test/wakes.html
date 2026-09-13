@@ -1,0 +1,24 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Sunwake Rush wake preview</title>
+<style>body{margin:0;font:14px Arial;background:#183b3a;color:white}canvas{width:100vw;height:100vh;display:block}aside{position:fixed;top:16px;left:16px;background:#183b3add;padding:14px}button{padding:10px;cursor:pointer}p{margin-bottom:0}</style>
+<canvas id="game"></canvas><aside><button id="foam">Ordinary foam</button> <button id="rainbow">Maximum rainbow spray</button> <button id="speed">Stop / cruise</button> <button id="pause">Freeze / resume</button><p id="status"></p></aside>
+<script type="module">
+import { Renderer } from '../src/renderer.js';
+import { createRace } from '../src/simulation.js';
+import { waveHeight } from '../src/course.js';
+const race=createRace('free'),renderer=new Renderer(document.getElementById('game')),r=race.racers[0];
+race.phase='racing';renderer.lightMode='day';let frozen=false,last=0,a=0,speed=48;
+function level(n){r.speedLevel=n;renderer.particles=[];renderer.wakeHeads=[];}
+document.getElementById('foam').onclick=()=>level(1);
+document.getElementById('rainbow').onclick=()=>level(5);
+document.getElementById('pause').onclick=()=>frozen=!frozen;
+document.getElementById('speed').onclick=()=>speed=speed?0:48;
+level(1);
+function frame(now){const dt=Math.min((now-last)/1000||0,1/30);last=now;
+ if(!frozen){race.worldTime+=dt;a+=speed/140*dt;}
+ r.x=-500+Math.sin(a)*140;r.z=400+Math.cos(a)*140;r.yaw=Math.PI/2+a;
+ r.speed=speed;r.vx=Math.sin(r.yaw)*speed;r.vz=Math.cos(r.yaw)*speed;r.airborne=false;r.y=waveHeight(r.x,r.z,race.worldTime)+.35;
+ race.phase=frozen?'paused':'racing';renderer.draw(race,frozen?0:dt);
+ document.getElementById('status').textContent=`Speed ${speed} · Camera height ${renderer.eye[1].toFixed(2)} · Level ${r.speedLevel} · ${renderer.particles.filter(p=>p.foam).length} foam patches · ${renderer.particles.filter(p=>p.sideSpray).length} side droplets · WebGL ${renderer.gl.getError()===0?'OK':'ERROR'}`;
+ requestAnimationFrame(frame);
+}requestAnimationFrame(frame);
+</script></html>

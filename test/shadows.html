@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>Sunwake Rush shadow preview</title>
+<style>body{margin:0;background:#183b3a;font:13px Arial;color:#f4f6df}canvas{width:100vw;height:100vh;display:block}aside{position:fixed;top:20px;left:20px;background:#183b3add;padding:16px;border-radius:5px}button{padding:10px;background:#c7ff75;border:0;cursor:pointer;margin-right:12px}</style>
+<canvas id="game"></canvas><aside><button id="toggle">Show airborne</button><span id="status">Grounded · all four shadows</span></aside>
+<script type="module">
+import { Renderer } from '../src/renderer.js';
+import { createRace } from '../src/simulation.js';
+import { waveHeight } from '../src/course.js';
+const race=createRace(),renderer=new Renderer(document.getElementById('game'));
+race.phase='racing';const p=race.racers[0],s=Math.sin(p.yaw),c=Math.cos(p.yaw);
+for(let i=1;i<4;i++){
+ const r=race.racers[i],ahead=10+(i-1)*7,side=(i%2?1:-1)*6;
+ r.x=p.x+s*ahead+c*side;r.z=p.z+c*ahead-s*side;r.yaw=p.yaw;
+}
+let elevated=false,previous=0;
+document.getElementById('toggle').onclick=()=>{
+ elevated=!elevated;document.getElementById('toggle').textContent=elevated?'Show grounded':'Show airborne';
+ document.getElementById('status').textContent=elevated?'Airborne · player six meters above water':'Grounded · all four shadows';
+};
+function frame(now){
+ const dt=Math.min((now-previous)/1000||0,.05);previous=now;
+ race.worldTime+=dt;
+ for(const r of race.racers)r.y=waveHeight(r.x,r.z,race.worldTime)+.35+(elevated&&r.id===0?6:0);
+ renderer.draw(race,dt);
+ requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script></html>

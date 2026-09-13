@@ -1,0 +1,38 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Sunwake Rush sound effects</title>
+<style>body{background:#183b3a;color:#f4f6df;font:18px Arial;padding:40px}button{padding:16px;margin:8px;background:#c7ff75;border:0;cursor:pointer}</style>
+<h1>Sound effects</h1><button id="pass">Correct buoy</button><button id="miss">Missed buoy</button><button id="max">Reach maximum level</button><button id="gull">Seagull squawk</button><button id="mute">Mute / unmute</button><p id="status">Choose a cue to enable audio.</p>
+<script type="module">
+import { RaceAudio } from '../src/audio.js';
+const sound=new RaceAudio(),status=document.getElementById('status');let analyser,samples,peak=0;
+let surfRace;
+for(const [id,label,x] of [["rival-left","Rival on left",12],["rival-right","Rival on right",-12],["rival-far","Distant rival",180]]){
+ const button=document.createElement("button");button.id=id;button.textContent=label;status.before(button);
+ button.onclick=async()=>{await cue("engine");surfRace={phase:"racing",worldTime:1,racers:[{x:-600,z:-600,yaw:0,speed:0},{x:-600+x,z:-600,yaw:0,speed:45}]};};
+}
+for(const [id,label] of [['shore','Shore surf'],['sea','Open sea'],['pause','Pause surf']]){
+ const button=document.createElement('button');button.id=id;button.textContent=label;status.before(button);
+ button.onclick=async()=>{
+  await cue('surf');
+  surfRace={phase:id==='pause'?'paused':'racing',worldTime:1,racers:[{x:id==='sea'?-600:0,z:id==='sea'?-600:-100,yaw:0,speed:0}]};
+ };
+}
+async function cue(type){
+ await sound.unlock();
+ if(!analyser){analyser=sound.context.createAnalyser();analyser.fftSize=2048;sound.master.connect(analyser);samples=new Float32Array(analyser.fftSize);}
+ peak=0;sound.event({type:type==='max'?'speedLevel':type,id:0,level:5});
+ if(type==='max')sound.event({type:'gate',id:0});
+ if(type==='gull')sound.seagull();
+}
+document.getElementById('pass').onclick=()=>cue('gate');
+document.getElementById('miss').onclick=()=>cue('miss');
+document.getElementById('max').onclick=()=>cue('max');
+document.getElementById('gull').onclick=()=>cue('gull');
+document.getElementById('mute').onclick=()=>{sound.toggle();peak=0;};
+let previous=0;
+function frame(now){
+ const dt=Math.min(.1,(now-previous)/1000);previous=now;
+ if(surfRace){if(surfRace.phase==='racing')surfRace.worldTime+=dt;sound.update(surfRace);sound.engineGain.gain.value=0;sound.waterGain.gain.value=0;sound.nextGull=Infinity;}
+ if(analyser){analyser.getFloatTimeDomainData(samples);for(const sample of samples)peak=Math.max(peak,Math.abs(sample));status.textContent=`Audio ${sound.context.state} · ${sound.muted?'MUTED':'ON'} · Output peak ${peak.toFixed(3)}${surfRace?' · Surf gain '+sound.surfGain.gain.value.toFixed(3)+' · Rival gain '+sound.rivalEngines[0].gain.gain.value.toFixed(3)+' · Pan '+(sound.rivalEngines[0].pan?.pan.value||0).toFixed(2):''}`;}
+ requestAnimationFrame(frame);
+}requestAnimationFrame(frame);
+</script></html>

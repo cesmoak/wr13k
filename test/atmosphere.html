@@ -1,0 +1,51 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Sunwake Rush atmosphere checks</title>
+<style>body{margin:0;background:#123;color:white;font:14px Arial}canvas{display:block;width:100vw;height:100vh}aside{position:fixed;bottom:15px;left:15px;background:#123e;padding:12px}button{padding:9px;margin:3px}pre{white-space:pre-wrap}</style>
+<canvas id="game"></canvas><aside><button id="day">Day</button><button id="night">Night</button><button id="turn">Turn camera 30°</button><button id="pause">Freeze / fly</button><button id="check">Check flare occlusion</button><pre id="report">18 procedural seagulls · bank, flap and glide</pre></aside>
+<script type="module">
+import {Renderer} from '../src/renderer.js';
+import {createRace} from '../src/simulation.js';
+const renderer=new Renderer(document.querySelector('canvas')),race=createRace();
+race.phase='racing';renderer.lightMode='day';
+Object.assign(race.racers[0],{x:-105,y:1,z:-112,yaw:1.48,speed:0});
+renderer.eye=[-120,8,-114];
+document.querySelector('#day').onclick=()=>renderer.lightMode='day';
+document.querySelector('#night').onclick=()=>renderer.lightMode='night';
+document.querySelector('#turn').onclick=()=>{
+ const p=race.racers[0];p.yaw+=Math.PI/6;renderer.cameraReady=false;
+ renderer.eye=[p.x-Math.sin(p.yaw)*15,p.y+7.3,p.z-Math.cos(p.yaw)*15];
+};
+let frozen=false,pending=false;
+document.querySelector('#pause').onclick=()=>frozen=!frozen;
+document.querySelector('#check').onclick=()=>pending=true;
+const normalFlare=renderer.drawSunFlare.bind(renderer);
+renderer.drawSunFlare=(width,height)=>{
+ if(!pending){normalFlare(width,height);return;}
+ pending=false;
+ const gl=renderer.gl,light={...renderer.lighting},night=renderer.nightBlend,sunScreen=renderer.sunScreen;
+ const read=(x,y)=>{const p=new Uint8Array(4);gl.readPixels(x,y,1,1,gl.RGBA,gl.UNSIGNED_BYTE,p);return p;};
+ const sx=Math.round(.59*width),sy=Math.round(.61*height),probeX=Math.round(sx-width*.04);
+ renderer.lighting={altitude:1,twilight:0};renderer.nightBlend=0;renderer.sunScreen={x:.18,y:.22};
+ // Control the source patch so this checks both visibility states regardless
+ // of the scenery currently behind the sun. Readback is test-only.
+ gl.enable(gl.SCISSOR_TEST);gl.scissor(sx-5,sy-5,11,11);gl.clearColor(1,1,.78,1);gl.clear(gl.COLOR_BUFFER_BIT);gl.disable(gl.SCISSOR_TEST);
+ const before=read(probeX,sy);normalFlare(width,height);const visible=read(probeX,sy);
+ gl.enable(gl.SCISSOR_TEST);gl.scissor(sx-5,sy-5,11,11);gl.clearColor(0,0,0,1);gl.clear(gl.COLOR_BUFFER_BIT);gl.disable(gl.SCISSOR_TEST);
+ normalFlare(width,height);const hidden=read(probeX,sy);
+ renderer.nightBlend=1;renderer.lighting.altitude=-1;
+ normalFlare(width,height);const moon=read(probeX,sy);
+ renderer.nightBlend=0;renderer.lighting.altitude=1;renderer.sunScreen=null;
+ normalFlare(width,height);const behind=read(probeX,sy);
+ renderer.sunScreen={x:1.5,y:.64};normalFlare(width,height);const outside=read(probeX,sy);
+ renderer.lighting=light;renderer.nightBlend=night;renderer.sunScreen=sunScreen;
+ const same=(a,b)=>a.every((v,i)=>v===b[i]);
+ document.querySelector('#report').textContent=[
+  `${visible.some((v,i)=>i<3&&v>before[i])?'PASS':'FAIL'} visible sun adds flare`,
+  `${same(visible,hidden)?'PASS':'FAIL'} covered sun suppresses flare`,
+  `${same(hidden,moon)?'PASS':'FAIL'} night suppresses sun flare`,
+  `${same(moon,behind)&&same(behind,outside)?'PASS':'FAIL'} behind-camera and offscreen sun suppress flare`,
+  `${gl.getError()===0?'PASS':'FAIL'} no WebGL errors`
+ ].join('\n');
+};
+let last=0;
+function frame(now){const dt=Math.min((now-last)/1000||0,1/30);last=now;if(!frozen)race.worldTime+=dt;renderer.draw(race,dt);requestAnimationFrame(frame);}requestAnimationFrame(frame);
+</script></html>

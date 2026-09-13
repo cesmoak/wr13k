@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>Sunwake Rush rider balance</title>
+<style>body{margin:0;background:#183b3a;font:14px Arial;color:#f4f6df}canvas{width:100vw;height:100vh;display:block}aside{position:fixed;top:20px;left:20px;background:#183b3aee;padding:16px;border-radius:5px}button{padding:10px;background:#c7ff75;border:0;cursor:pointer;margin-right:8px}p{margin:12px 0 0}</style>
+<canvas id="game"></canvas><aside><button id="bank">Hold bank</button><button id="rock">Rock hull</button><button id="land">Landing impulse</button><p id="status"></p><p>Real rider physics; hull held in view to show relative motion. White pole marks world vertical.</p></aside>
+<script type="module">
+import { Renderer } from '../src/renderer.js';
+import { createRacer } from '../src/simulation.js';
+import { springRider, riderPose, stepBoat, resetBoat } from '../src/boat-physics.js';
+import { createRiderMesh, MeshBuilder } from '../src/mesh.js';
+import { modelMatrix, multiply, perspective, lookAt } from '../src/math.js';
+const canvas=document.getElementById('game'),renderer=new Renderer(canvas),gl=renderer.gl,r=createRacer(0);
+Object.assign(r,{x:0,y:0,z:0,yaw:0,pitch:.25,roll:.65});
+const marker=new MeshBuilder();marker.box(-2.8,1.5,0,.04,4,.04,[1,1,1]);
+marker.box(0,-1.2,0,10,.1,9,[.1,.45,.49]);const reference=renderer.upload(marker);
+let mode='bank',time=0,previous=0,impulse=0;
+let sideView=false,jumpTime=0,turn=1,turnSpeed=40;
+for(const [label,action] of [['Side / rear view',()=>sideView=!sideView],['Level hull',()=>mode='level'],['Jump cycle',()=>{mode='jump';jumpTime=4;}],['Wave load',()=>mode='load'],['Turn left',()=>{mode='turn';turn=1;}],['Turn right',()=>{mode='turn';turn=-1;}],['Slow / fast turn',()=>turnSpeed=turnSpeed===40?2:40]]){
+ const button=document.createElement('button');button.textContent=label;button.onclick=action;document.querySelector('aside').prepend(button);
+}
+document.getElementById('bank').onclick=()=>mode='bank';
+document.getElementById('rock').onclick=()=>mode='rock';
+document.getElementById('land').onclick=()=>impulse=1;
+function frame(now){
+ const dt=Math.min((now-previous)/1000||0,1/30);previous=now;time+=dt;
+ const pitch=['level','jump','load'].includes(mode)?0:mode==='rock'?.45*Math.sin(time*2.7):.25;
+ const roll=mode==='turn'?-turn*(turnSpeed>10?.3:.04):['level','jump','load'].includes(mode)?0:mode==='rock'?.75*Math.sin(time*3.1):.65;
+ r.steer=mode==='turn'?turn:0;r.speed=mode==='turn'?turnSpeed:0;
+ r.pitchRate=(pitch-r.pitch)/Math.max(dt,.001);r.rollRate=(roll-r.roll)/Math.max(dt,.001);r.pitch=pitch;r.roll=roll;
+ if(mode==='jump'){
+  jumpTime+=dt;
+  if(jumpTime>3){resetBoat(r,time);r.y=2;r.vy=5;jumpTime=0;}
+  if(dt>0)stepBoat(r,{},dt,time,[],()=>({height:0,nx:0,ny:1,nz:0,velocity:0}));
+ }else{
+  r.airborne=false;
+  const steps=Math.max(1,Math.ceil(dt*240));
+  for(let i=0;i<steps;i++)springRider(r,mode==='turn'?turn*(turnSpeed>10?25:1):0,impulse*160+(mode==='load'?45*Math.sin(time*4):0),0,dt/steps);
+ }
+ impulse=Math.max(0,impulse-dt*10);
+ canvas.width=Math.round(canvas.clientWidth*devicePixelRatio);canvas.height=Math.round(canvas.clientHeight*devicePixelRatio);
+ gl.viewport(0,0,canvas.width,canvas.height);gl.clearColor(.12,.24,.28,1);gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);gl.useProgram(renderer.program);
+ const eye=sideView?[10,2,0]:[6,3.8,-8];gl.uniformMatrix4fv(renderer.loc.uView,false,multiply(perspective(.7,canvas.width/canvas.height,.1,100),lookAt(eye,[0,1,0])));
+ gl.uniform3fv(renderer.loc.uEye,eye);gl.uniform1f(renderer.loc.uTime,time);
+ renderer.drawMesh(reference);
+ const hull=modelMatrix(0,0,0,r.yaw,r.pitch,r.roll);renderer.drawMesh(renderer.crafts[0],hull);
+ const mesh=createRiderMesh(r);gl.bindBuffer(gl.ARRAY_BUFFER,renderer.riderBuffer);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(mesh.data),gl.DYNAMIC_DRAW);
+ renderer.drawMesh({buffer:renderer.riderBuffer,count:mesh.data.length/9},hull);
+ const world=multiply(hull,riderPose(r).torsoMatrix),angle=Math.acos(Math.min(1,world[5]))*180/Math.PI;
+ document.getElementById('status').textContent=`${mode}${mode==='turn'?' · '+turnSpeed+' speed':''}${r.airborne?' · AIRBORNE':''} · hull bank ${(roll*180/Math.PI).toFixed(0)}° · torso lean ${angle.toFixed(1)}° · suspension ${r.rider.y.toFixed(2)} · pole ${(r.rider.handlePitch*180/Math.PI).toFixed(0)}° · WebGL ${gl.getError()}`;
+ requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script></html>

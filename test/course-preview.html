@@ -1,0 +1,62 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Sunwake Rush channel preview</title>
+<style>body{margin:0;font:14px Arial;background:#183b3a;color:#f4f6df}canvas{width:100vw;height:100vh;display:block}aside{position:fixed;top:20px;left:20px;background:#183b3add;padding:16px}button{padding:10px;background:#c7ff75;border:0;cursor:pointer;margin-right:8px}</style>
+<canvas id="game"></canvas><aside><button data-gate="0">Start straight</button><button data-gate="10">Island channel</button><button data-gate="14">North shore</button><button data-gate="3">Rocky island</button><button id="beach">Beach surf</button><button id="night">Night / day</button><button id="beacon">Lighthouse view</button><button id="rock-view">Rock close view</button><p><button data-lap="1">Main · Day</button><button data-lap="2">Reverse · Sunset</button><button data-lap="3">Rocky · Night</button></p><p id="status"></p><p id="lighting"></p></aside>
+<script type="module">
+import { Renderer } from '../src/renderer.js';
+import { createRace } from '../src/simulation.js';
+import { gates, LIGHTHOUSE, coursePoint, courseTangent, GATE_COUNT, islands } from '../src/course.js';
+import { resetBoat, stepBoat } from '../src/boat-physics.js';
+const race=createRace(),renderer=new Renderer(document.getElementById('game'));race.phase='racing';
+const reefButton=document.createElement('button');reefButton.id='outer-reef';reefButton.textContent='Outer reef slalom';
+document.querySelector('aside').prepend(reefButton);
+reefButton.onclick=()=>{
+ Object.assign(race,createRace('sunrise'),{phase:'racing'});renderer.lightMode='day';
+ for(const r of race.racers){Object.assign(r,{x:365+r.id*5,z:103+r.id*8,yaw:Math.atan2(30,-100),nextGate:5});resetBoat(r,race.worldTime);}
+ renderer.cameraReady=false;
+ document.getElementById('status').textContent='Sunrise outer reef · weave between staggered outcrops east of the smaller island';
+};
+function station(index){
+ if(race.course.id!=='rocky')Object.assign(race,createRace('rocky'),{phase:'racing'});
+ const g=gates[index],s=g.tangent.x,c=g.tangent.z;
+ for(const r of race.racers){const ahead=(r.id===0?-25:10+r.id*10),side=r.id%2?6:-6;
+ Object.assign(r,{x:g.x+s*ahead+c*side,z:g.z+c*ahead-s*side,yaw:Math.atan2(s,c),speed:0,vx:0,vz:0,nextGate:index});resetBoat(r,race.worldTime);}
+ renderer.cameraReady=false;
+ const p=race.racers[0];renderer.eye=[p.x-s*15,p.y+7.3,p.z-c*15];
+ document.getElementById('status').textContent=`Buoy ${index+1} · ${g.channel?'Between the two islands':g.offshore?'Exposed sea · rocky island loop':'Following the main shoreline'}`;
+}
+for(const button of document.querySelectorAll('[data-gate]'))button.onclick=()=>station(Number(button.dataset.gate));
+for(const button of document.querySelectorAll('[data-lap]'))button.onclick=()=>{
+ const id={1:'main',2:'reverse',3:'rocky'}[button.dataset.lap];
+ Object.assign(race,createRace(id),{phase:'racing'});const course=race.course;
+ const p=coursePoint(.5,course),v=courseTangent(.5,course);
+ renderer.lightMode='auto';
+ Object.assign(race.racers[0],p,{yaw:Math.atan2(v.x,v.z),lap:2,passed:course.gates.length+Math.floor(course.gates.length/2),nextGate:Math.floor(course.gates.length/2)});
+ resetBoat(race.racers[0],race.worldTime);renderer.cameraReady=false;
+ document.getElementById('status').textContent=course.description;
+};
+document.getElementById('beach').onclick=()=>{
+ station(0);const p=race.racers[0];Object.assign(p,{x:5,z:-127,yaw:0});
+ resetBoat(p,race.worldTime);renderer.cameraReady=false;
+ document.getElementById('status').textContent='Beach surf · broad foam lines travel toward the sand';
+};
+document.getElementById('night').onclick=()=>renderer.lightMode=renderer.lightMode==='night'?'auto':'night';
+document.getElementById('beacon').onclick=()=>{
+ station(10);const p=race.racers[0];p.x=LIGHTHOUSE.x-125;p.z=LIGHTHOUSE.z-145;p.yaw=Math.atan2(LIGHTHOUSE.x-p.x,LIGHTHOUSE.z-p.z);
+ resetBoat(p,race.worldTime);renderer.cameraReady=false;
+ renderer.eye=[p.x-Math.sin(p.yaw)*15,p.y+7.3,p.z-Math.cos(p.yaw)*15];
+ document.getElementById('status').textContent='Lighthouse on the rocky island · rotating rainbow prism';
+};
+document.getElementById('rock-view').onclick=()=>{
+ station(3);const p=race.racers[0],rock=islands[2];p.x=295;p.z=-285;p.yaw=Math.atan2(rock.x-p.x,rock.z-p.z);
+ resetBoat(p,race.worldTime);renderer.cameraReady=false;
+ renderer.eye=[p.x-Math.sin(p.yaw)*15,p.y+7.3,p.z-Math.cos(p.yaw)*15];
+ document.getElementById('status').textContent='Small rocky island · exposed offshore water';
+};
+station(10);let last=0;
+function frame(now){const dt=Math.min((now-last)/1000||0,1/30);last=now;race.worldTime+=dt;
+ for(const r of race.racers)stepBoat(r,{},Math.max(dt,.001),race.worldTime,[],undefined,true);
+ renderer.draw(race,dt);
+ document.getElementById('lighting').textContent=`${renderer.lighting.label} · WebGL ${renderer.gl.getError()===0?'OK':'ERROR'} · Camera ${renderer.eye[1].toFixed(2)} · Hull ${race.racers[0].y.toFixed(2)}`;
+ requestAnimationFrame(frame);
+}requestAnimationFrame(frame);
+</script></html>
