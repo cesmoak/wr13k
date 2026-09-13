@@ -1,0 +1,39 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Feature cut study</title>
+<style>body{margin:0;background:#142c2e;color:#edf4e8;font:14px system-ui}header{padding:16px 22px;display:flex;align-items:center;gap:18px;flex-wrap:wrap}h1{font-size:20px;margin:0}select,button{font:inherit;padding:8px}a{color:#c7ff75}p{margin:0;padding:0 22px 14px}iframe{width:100%;height:66vh;border:0;background:#000}table{border-collapse:collapse;margin:18px 22px}td,th{padding:7px 18px 7px 0;text-align:left}td:nth-child(2),td:nth-child(3){text-align:right}#status{padding:12px 22px;color:#c7ff75}</style>
+<header><h1>Feature cut study</h1><select id="variant" aria-label="Build variant"></select><a id="open" target="_blank">Open game</a><a id="zip">ZIP</a><button id="check">Check all builds</button></header>
+<p id="detail"></p><iframe id="game" title="Selected game build"></iframe><div id="status">Each saving is relative to the same baseline; savings are not additive.</div><table><thead><tr><th>Cut</th><th>ZIP bytes</th><th>Saved</th></tr></thead><tbody></tbody></table>
+<script type="module">
+const basePath='../dist/'+(new URLSearchParams(location.search).get('study')==='hud'?'hud-study':'cut-study')+'/';
+if(location.search.includes('study=hud'))document.querySelector('h1').textContent='Race HUD study';
+const report=await fetch(basePath+'report.json').then(r=>r.json()),select=document.querySelector('#variant'),frame=document.querySelector('#game'),status=document.querySelector('#status');
+for(const row of report.variants){
+ const option=document.createElement('option');option.value=row.id;option.textContent=row.label;select.append(option);
+ const tr=document.createElement('tr');for(const text of [row.label,row.zipBytes.toLocaleString(),row.saved.toLocaleString()]){const td=document.createElement('td');td.textContent=text;tr.append(td);}document.querySelector('tbody').append(tr);
+}
+function show(){const row=report.variants.find(r=>r.id===select.value);frame.removeAttribute('srcdoc');frame.src=`${basePath}${row.id}.html`;document.querySelector('#detail').textContent=row.detail||'Full game, fixed minifier settings, standard ZIP with Zopfli.';document.querySelector('#open').href=frame.src;document.querySelector('#zip').href=`${basePath}${row.id}.zip`;}
+select.onchange=show;show();
+const wait=ms=>new Promise(r=>setTimeout(r,ms));
+window.cutErrors=[];
+document.querySelector('#check').onclick=async e=>{
+ e.target.disabled=true;select.disabled=true;const results=[];
+ try{
+  for(const row of report.variants){
+   status.textContent=`Checking ${row.label}…`;window.cutErrors=[];
+   const html=await fetch(`${basePath}${row.id}.html`).then(r=>r.text());
+   const instrumentation=`<script>window.addEventListener('error',e=>parent.cutErrors.push(e.message));window.addEventListener('unhandledrejection',e=>parent.cutErrors.push(String(e.reason)));for(const [method,check,flag,log] of [['compileShader','getShaderParameter','COMPILE_STATUS','getShaderInfoLog'],['linkProgram','getProgramParameter','LINK_STATUS','getProgramInfoLog']]){const p=WebGLRenderingContext.prototype,original=p[method];p[method]=function(object){original.call(this,object);if(!this[check](object,this[flag]))parent.cutErrors.push(this[log](object));};}<\/script>`;
+   const loaded=new Promise(resolve=>frame.onload=resolve);frame.srcdoc=html.replace('<script>',instrumentation+'<script>');await loaded;await wait(150);
+   const w=frame.contentWindow,d=frame.contentDocument,$=id=>d.getElementById(row.selectors[id]??id);
+   if(!$('start')||!$('game'))throw Error('missing game UI');
+   const buttons=d.querySelector('.'+row.selectors['course-menu']).children;if(buttons.length!==5)throw Error('missing course choices');
+   buttons[1].click();$('start').click();await wait(3900);
+   w.dispatchEvent(new w.KeyboardEvent('keydown',{code:'KeyW'}));await wait(450);w.dispatchEvent(new w.KeyboardEvent('keyup',{code:'KeyW'}));
+   if(!(Number($('speed').textContent)>0))throw Error('throttle did not move the craft');
+   const gl=$('game').getContext('webgl');if(!gl||gl.isContextLost()||gl.getError())throw Error('WebGL error');
+   if(window.cutErrors.length)throw Error(window.cutErrors.join('; '));
+   results.push(row.id);status.textContent=`PASS ${results.length}/${report.variants.length}: ${row.label}`;
+  }
+  status.textContent=`PASS — all ${results.length} builds: shader compilation/linking, startup, five course choices, driving, WebGL, and no captured runtime errors.`;
+ }catch(error){status.textContent=`FAIL after ${results.length} builds: ${error.message}`;}
+ finally{e.target.disabled=false;select.disabled=false;show();}
+};
+</script></html>

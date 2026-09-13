@@ -6,7 +6,7 @@ import { COURSES,gates,GATE_COUNT,LAPS,coursePoint,waveHeight,islands,shoreRadiu
 const dt=1/60;
 test('water landings emit one impact-scaled splash and respect pause and restart',()=>{
   const drop=height=>{
-    const race=createRace('free');startRace(race);const r=race.racers[0];
+    const race=createRace('main');startRace(race);race.phase='racing';race.racers.length=1;const r=race.racers[0];
     Object.assign(r,{x:-350,z:350,y:height,vy:-2,vx:0,vz:0,airborne:true});
     let contactTime;
     for(let i=0;i<180;i++){
@@ -45,7 +45,11 @@ test('ordered gates, crossing width, direction, three laps, and finish',()=>{
   cross(race,1);assert.equal(r.passed,LAPS*GATE_COUNT+1);
 });
 test('speed bonus is automatic, ignores the old boost input, and braking reduces speed',()=>{
-  const a=createRace('free'),b=createRace('free');startRace(a);startRace(b);
+  const a=createRace('main'),b=createRace('main');
+  for(const race of [a,b]){
+    startRace(race);race.phase='racing';race.racers.length=1;
+    Object.assign(race.racers[0],{x:-350,z:350,yaw:0});
+  }
   a.racers[0].speedLevel=b.racers[0].speedLevel=5;
   for(let i=0;i<120;i++){
     stepRace(a,{throttle:1},dt);stepRace(b,{throttle:1,boost:true},dt);

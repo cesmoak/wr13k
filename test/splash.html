@@ -5,9 +5,9 @@
 import { Renderer } from '../src/renderer.js';
 import { RaceAudio } from '../src/audio.js';
 import { createRace, startRace, stepRace } from '../src/simulation.js';
-const race=createRace('free'),renderer=new Renderer(document.getElementById('game')),sound=new RaceAudio();
+const race=createRace('main'),renderer=new Renderer(document.getElementById('game')),sound=new RaceAudio();
 let last=0,accumulator=0,count=0,strength=0,active=false;
-async function drop(height){await sound.unlock();startRace(race);Object.assign(race.racers[0],{x:-350,z:350,y:height,vy:-2,vx:0,vz:0,airborne:true});count=0;strength=0;accumulator=0;active=true;}
+async function drop(height){await sound.unlock();startRace(race);race.phase='racing';race.racers.length=1;Object.assign(race.racers[0],{x:-350,z:350,y:height,vy:-2,vx:0,vz:0,airborne:true});count=0;strength=0;accumulator=0;active=true;}
 document.getElementById('soft').onclick=()=>drop(2);
 document.getElementById('hard').onclick=()=>drop(8);
 function frame(now){const dt=Math.min((now-last)/1000||0,.05);last=now;

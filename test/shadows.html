@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en"><meta charset="utf-8"><title>Sunwake Rush shadow preview</title>
 <style>body{margin:0;background:#183b3a;font:13px Arial;color:#f4f6df}canvas{width:100vw;height:100vh;display:block}aside{position:fixed;top:20px;left:20px;background:#183b3add;padding:16px;border-radius:5px}button{padding:10px;background:#c7ff75;border:0;cursor:pointer;margin-right:12px}</style>
-<canvas id="game"></canvas><aside><button id="toggle">Show airborne</button><span id="status">Grounded · all four shadows</span></aside>
+<canvas id="game"></canvas><aside><button id="toggle">Show airborne</button><span id="status">Grounded · four round, fixed-size shadows</span></aside>
 <script type="module">
 import { Renderer } from '../src/renderer.js';
 import { createRace } from '../src/simulation.js';
@@ -15,7 +15,7 @@ for(let i=1;i<4;i++){
 let elevated=false,previous=0;
 document.getElementById('toggle').onclick=()=>{
  elevated=!elevated;document.getElementById('toggle').textContent=elevated?'Show grounded':'Show airborne';
- document.getElementById('status').textContent=elevated?'Airborne · player six meters above water':'Grounded · all four shadows';
+ document.getElementById('status').textContent=elevated?'Airborne · player six meters above water; round shadow size and strength unchanged':'Grounded · four round, fixed-size shadows';
 };
 function frame(now){
  const dt=Math.min((now-previous)/1000||0,.05);previous=now;

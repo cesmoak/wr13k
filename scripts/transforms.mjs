@@ -9,7 +9,7 @@ const rewrite=(source,edits)=>{
   return source;
 };
 export function stripCourseDefaults(source){
-  const required={createRace:1,createRacer:2,courseTangent:2,createGateMesh:4,createRainbowMesh:1,createBuoys:1},edits=[];
+  const required={createRace:1,createRacer:2,courseTangent:2,createRainbowMesh:1,createBuoys:1},edits=[];
   walk(parse(source,{ecmaVersion:'latest'}),node=>{
     if(node.type==='FunctionDeclaration'&&required[node.id.name]){
       for(const p of node.params)if(p.type==='AssignmentPattern')edits.push([p.left.end,p.end,'']);
@@ -40,7 +40,7 @@ export function inlineWebGLConstants(source){
 }
 export const ENUMS={phase:['title','countdown','racing','paused','finished','lost'],
   type:['beep','go','splash','gate','speedLevel','impact','miss','lap','finish','lose'],
-  lighting:['cycle','day','night','sunrise','sunset']};
+  lighting:['day','night','sunrise','sunset']};
 export function encodeEnums(source){
   const edits=new Map(),ast=parse(source,{ecmaVersion:'latest'});
   const domain=node=>node?.type==='MemberExpression'&&!node.computed?node.property.name:null;

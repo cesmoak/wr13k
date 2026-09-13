@@ -1,10 +1,10 @@
 <!doctype html><html lang="en"><meta charset="utf-8"><title>Sunwake Rush channel preview</title>
 <style>body{margin:0;font:14px Arial;background:#183b3a;color:#f4f6df}canvas{width:100vw;height:100vh;display:block}aside{position:fixed;top:20px;left:20px;background:#183b3add;padding:16px}button{padding:10px;background:#c7ff75;border:0;cursor:pointer;margin-right:8px}</style>
-<canvas id="game"></canvas><aside><button data-gate="0">Start straight</button><button data-gate="10">Island channel</button><button data-gate="14">North shore</button><button data-gate="3">Rocky island</button><button id="beach">Beach surf</button><button id="night">Night / day</button><button id="beacon">Lighthouse view</button><button id="rock-view">Rock close view</button><p><button data-lap="1">Main · Day</button><button data-lap="2">Reverse · Sunset</button><button data-lap="3">Rocky · Night</button></p><p id="status"></p><p id="lighting"></p></aside>
+<canvas id="game"></canvas><aside><button data-gate="0">Start straight</button><button data-gate="10">Island channel</button><button data-gate="14">North shore</button><button data-gate="3">Rocky island</button><button id="beach">Shoreline foam</button><button id="night">Day / sunset / night</button><button id="beacon">Lighthouse view</button><button id="rock-view">Rock close view</button><p><button data-lap="1">Main · Day</button><button data-lap="2">Reverse · Sunset</button><button data-lap="3">Rocky · Night</button></p><p id="status"></p><p id="lighting"></p></aside>
 <script type="module">
 import { Renderer } from '../src/renderer.js';
 import { createRace } from '../src/simulation.js';
-import { gates, LIGHTHOUSE, coursePoint, courseTangent, GATE_COUNT, islands } from '../src/course.js';
+import { gates, COURSES, LIGHTHOUSE, coursePoint, courseTangent, GATE_COUNT, islands } from '../src/course.js';
 import { resetBoat, stepBoat } from '../src/boat-physics.js';
 const race=createRace(),renderer=new Renderer(document.getElementById('game'));race.phase='racing';
 const reefButton=document.createElement('button');reefButton.id='outer-reef';reefButton.textContent='Outer reef slalom';
@@ -37,9 +37,12 @@ for(const button of document.querySelectorAll('[data-lap]'))button.onclick=()=>{
 document.getElementById('beach').onclick=()=>{
  station(0);const p=race.racers[0];Object.assign(p,{x:5,z:-127,yaw:0});
  resetBoat(p,race.worldTime);renderer.cameraReady=false;
- document.getElementById('status').textContent='Beach surf · broad foam lines travel toward the sand';
+ document.getElementById('status').textContent='Shoreline foam · broken whitecaps and a narrow wash at the waterline';
 };
-document.getElementById('night').onclick=()=>race.lightingCourse=race.lightingCourse?null:{...race.course,lighting:'night'};
+document.getElementById('night').onclick=()=>{
+ const modes=['day','sunset','night'],current=race.lightingCourse?.lighting||race.course.lighting;
+ race.lightingCourse={...race.course,lighting:modes[(modes.indexOf(current)+1)%modes.length]};
+};
 document.getElementById('beacon').onclick=()=>{
  station(10);const p=race.racers[0];p.x=LIGHTHOUSE.x-125;p.z=LIGHTHOUSE.z-145;p.yaw=Math.atan2(LIGHTHOUSE.x-p.x,LIGHTHOUSE.z-p.z);
  resetBoat(p,race.worldTime);renderer.cameraReady=false;
@@ -52,11 +55,17 @@ document.getElementById('rock-view').onclick=()=>{
  renderer.eye=[p.x-Math.sin(p.yaw)*15,p.y+7.3,p.z-Math.cos(p.yaw)*15];
  document.getElementById('status').textContent='Small rocky island · exposed offshore water';
 };
+const sunrise=document.createElement('button');sunrise.textContent='Sunrise lighting';sunrise.onclick=()=>{race.lightingCourse=COURSES.sunrise;race.racers[0].passed=0;};document.querySelector('aside').append(sunrise);
+for(const [label,progress] of [['Start light',0],['Midrace light',.5],['Finish light',1]]){
+ const button=document.createElement('button');button.textContent=label;button.onclick=()=>{
+  const course=race.lightingCourse||race.course;race.racers[0].passed=1+Math.round(course.gates.length*3*progress);
+ };document.querySelector('aside').append(button);
+}
 station(10);let last=0;
 function frame(now){const dt=Math.min((now-last)/1000||0,1/30);last=now;race.worldTime+=dt;
  for(const r of race.racers)stepBoat(r,{},Math.max(dt,.001),race.worldTime,undefined,true);
  renderer.draw(race,dt);
- document.getElementById('lighting').textContent=`WebGL ${renderer.gl.getError()===0?'OK':'ERROR'} · Camera ${renderer.eye[1].toFixed(2)} · Hull ${race.racers[0].y.toFixed(2)}`;
+ document.getElementById('lighting').textContent=`Lighting ${race.lightingCourse?.lighting||race.course.lighting} · ${race.racers[0].passed} checkpoints · altitude ${renderer.lighting.altitude.toFixed(2)} · WebGL ${renderer.gl.getError()===0?'OK':'ERROR'} · Camera ${renderer.eye[1].toFixed(2)} · Hull ${race.racers[0].y.toFixed(2)}`;
  requestAnimationFrame(frame);
 }requestAnimationFrame(frame);
 </script></html>

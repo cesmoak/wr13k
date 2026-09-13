@@ -1,4 +1,5 @@
 import { DEVELOPMENT } from './math.js';
+import { COURSE_CODES } from './course-codes.js';
 // Uneven stations preserve an opening run-up, then tighten into slalom clusters.
 const buoyStations = [0,1.35,2.4,3.35,4.35,5.35,6.25,7.05,8.05,9.25,10.25,11.25,12.25,13.05,14.05,15.05,16.15,17.25];
 export const GATE_COUNT = buoyStations.length;
@@ -30,11 +31,11 @@ function splinePoint(t,points) {
   return {x:spline(0),z:spline(1)};
 }
 function buildCourse(id,name,points,stations,difficulty='rocky') {
-  const course={id,name,points,freePlay:id==='free',
+  const course={id,name,points,
     progressCenter:id==='sunrise'?[290,-90]:id==='rocky'?[140,-130]:[0,0],
-    lighting:{free:'cycle',main:'day',reverse:'sunset',rocky:'night',sunrise:'sunrise'}[id],
-    aiSkill:{free:0,main:0,reverse:1,rocky:2,sunrise:2}[id]};
-  course.samples=Array.from({length:240},(_,i)=>splinePoint(i/240,points));
+    lighting:{main:'day',reverse:'sunset',rocky:'night',sunrise:'sunrise'}[id],
+    aiSkill:{main:0,reverse:1,rocky:2,sunrise:2}[id]};
+  if(DEVELOPMENT){course.samples=Array.from({length:240},(_,i)=>splinePoint(i/240,points));}
   course.gates=stations.map((station,index)=>{
     const t=station/points.length,p=splinePoint(t,points),a=splinePoint(t-.0001,points),b=splinePoint(t+.0001,points),d=Math.hypot(b.x-a.x,b.z-a.z);
     const tangent={x:(b.x-a.x)/d,z:(b.z-a.z)/d},side=index%2?1:-1;
@@ -47,12 +48,12 @@ function buildCourse(id,name,points,stations,difficulty='rocky') {
     return {x,z,tangent,...(DEVELOPMENT?{index}:{}),side,width,slalom,channel,offshore:difficulty==='reef'?z< -130:difficulty==='rocky'&&index>=2&&index<=8,
       buoy:{x:x+tangent.z*side*width,z:z-tangent.x*side*width}};
   });
-  course.bounds={
+  if(DEVELOPMENT){course.bounds={
     minX:Math.min(...course.samples.map(p=>p.x),...landforms.map(i=>i.x-i.rx*1.08))-35,
     maxX:Math.max(...course.samples.map(p=>p.x),...landforms.map(i=>i.x+i.rx*1.08))+35,
     minZ:Math.min(...course.samples.map(p=>p.z),...landforms.map(i=>i.z-i.rz*1.08))-35,
     maxZ:Math.max(...course.samples.map(p=>p.z),...landforms.map(i=>i.z+i.rz*1.08))+35
-  };
+  };}
   return course;
 }
 const mainRoute=[[-105,-112],[55,-124],[135,-114],[170,-62],[180,5],[168,62],
@@ -62,13 +63,38 @@ const reverseRoute=[[-105,-112],[-180,-65],[-210,20],[-150,98],[-55,144],[48,146
 const sunriseRoute=[[180,0],[190,70],[240,125],[315,125],[365,70],[419,0],
   [383,-70],[431,-140],[440,-220],[393,-291],[325,-305],[257,-250],[240,-190],
   [222,-140],[184,-92],[180,-40]];
-export const COURSES={
-  free:buildCourse('free','Free play',mainRoute,[],'easy'),
+export function designCourses(){return {
   main:buildCourse('main','Main island loop',mainRoute,Array.from({length:10},(_,i)=>i*1.2),'easy'),
   reverse:buildCourse('reverse','Main island reverse',reverseRoute,Array.from({length:16},(_,i)=>i*.75),'hard'),
   rocky:buildCourse('rocky','Rocky island loop',route,buoyStations),
   sunrise:buildCourse('sunrise','Sunrise reef loop',sunriseRoute,[0,1,2,2.5,3,4,5,6,7,8,9,9.5,10,11,12,13,14,15],'reef')
-};
+};}
+
+// Seven ASCII characters per row: two for x/z/yaw, one for checkpoint width.
+export function unpackCourse(text){
+  return Array.from({length:text.length/7},(_,i)=>{
+    const pair=j=>(text.charCodeAt(i*7+j)-35)*91+text.charCodeAt(i*7+j+1)-35;
+    return [(pair(0)-2048)/4,(pair(2)-2048)/4,pair(4)/1000-4,text.charCodeAt(i*7+6)-35];
+  });
+}
+export const COURSES=Object.fromEntries(Object.entries(COURSE_CODES).map(([id,course])=>[id,{
+  ...course,id,grid:unpackCourse(course.grid),
+  gates:unpackCourse(course.gates).map(([x,z,yaw,width],index)=>({x,z,width,side:index%2?1:-1,tangent:{x:Math.sin(yaw),z:Math.cos(yaw)}}))
+}]));
+// Design routes and diagnostics stay editable without shipping their generator.
+// Source and production physics both use the same decoded gates and grids.
+if(DEVELOPMENT){
+  const designs=designCourses();
+  for(const [id,course] of Object.entries(COURSES)){
+    const design=designs[id];
+    Object.assign(course,{points:design.points,samples:design.samples,bounds:design.bounds});
+    course.gates.forEach((g,index)=>{
+      const {slalom,channel,offshore}=design.gates[index];
+      Object.assign(g,{index,slalom,channel,offshore,buoy:{x:g.x+g.tangent.z*g.side*g.width,z:g.z-g.tangent.x*g.side*g.width}});
+    });
+  }
+}
+
 export function coursePoint(t,course=COURSES.rocky){return splinePoint(t,course.points);}
 export function courseTangent(t,course=COURSES.rocky){
   const a=coursePoint(t-.0001,course),b=coursePoint(t+.0001,course),d=Math.hypot(b.x-a.x,b.z-a.z);
@@ -79,7 +105,6 @@ export const gates=COURSES.rocky.gates,courseSamples=COURSES.rocky.samples,cours
 export const LIGHTHOUSE = { x: islands[2].x, y: islands[2].height-3, z: islands[2].z, lampHeight: 37 };
 export const RAINBOW_COLORS = ['#ff655f','#ffab55','#ffe46b','#9ee36b','#58d8d9','#6095ee','#b87ae4'];
 export const RACER_COLORS = ['#9dff00', '#ff382f', '#8844ff', '#ffbd00'];
-export const RACER_NAMES = ['YOU', 'CORAL', 'IRIS', 'SOL'];
 
 // Layer coefficients also generate the GPU wave equations in renderer.js.
 export const WAVE_SCALE = 2.4;
@@ -118,9 +143,8 @@ export function waveHeight(x, z, time) {
 }
 export function sampleWater(x, z, time) {
   const h = waveHeight(x, z, time);
-  const dx = (waveHeight(x + .2, z, time) - waveHeight(x - .2, z, time)) / .4;
-  const dz = (waveHeight(x, z + .2, time) - waveHeight(x, z - .2, time)) / .4;
-  const velocity = (waveHeight(x, z, time + .01) - waveHeight(x, z, time - .01)) / .02;
+  const difference=(a,b,c)=>(waveHeight(x+a,z+b,time+c)-waveHeight(x-a,z-b,time-c))/(2*(a||b||c));
+  const dx=difference(.2,0,0),dz=difference(0,.2,0),velocity=difference(0,0,.01);
   const length = Math.hypot(dx, 1, dz);
   return { height: h, nx: -dx / length, ny: 1 / length, nz: -dz / length, velocity };
 }
@@ -143,11 +167,6 @@ export function seabedHeight(x,z) {
 }
 
 
+
 // Lighting only needs an angular estimate, anchored to the starting line.
 // Race checkpoints and standings do not use this approximation.
-export function courseProgress(x,z,course=COURSES.rocky) {
-  const [cx,cz]=course.progressCenter,[sx,sz]=course.points[0];
-  const angle=Math.atan2(z-cz,x-cx)-Math.atan2(sz-cz,sx-cx);
-  const direction=course.id==='reverse'||course.id==='sunrise'?-1:1;
-  return (angle*direction/(Math.PI*2)%1+1)%1;
-}

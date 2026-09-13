@@ -1,25 +1,14 @@
-import { clamp, lerp, angleDelta, multiply, perspective, lookAt, modelMatrix, randomSeed, DEVELOPMENT } from './math.js';
-import { waveHeight, WAVE_SCALE, WAVE_SPACING, WAVE_LAYERS, landforms, RAINBOW_COLORS, LIGHTHOUSE, courseProgress, OFFSHORE_SEA, COURSES, LAPS } from './course.js';
+import { clamp, lerp, blend, angleDelta, lookAt, modelMatrix, randomSeed, DEVELOPMENT } from './math.js';
+import { waveHeight, WAVE_SCALE, WAVE_SPACING, WAVE_LAYERS, landforms, RAINBOW_COLORS, LIGHTHOUSE, OFFSHORE_SEA, COURSES, LAPS } from './course.js';
 import { MAX_SPEED_LEVEL } from './boat-physics.js';
-import { createSeagullMesh } from './atmosphere.js';
-import { MeshBuilder, rgb, createIslandMesh, createCraftMesh, createGateMesh, createRiderMesh, createRainbowMesh, createLighthouseMesh, createBeaconMesh, createSeabedMesh, createSeaGrassMesh, createFishMesh } from './mesh.js';
+import { MeshBuilder, rgb, createIslandMesh, createCraftMesh, createBuoyMesh, createRiderMesh, createLighthouseMesh, createBeaconMesh, createSeabedMesh, createSeaGrassMesh } from './mesh.js';
 
-// Each course has its own atmosphere; free exploration follows a four-minute day.
-export function courseLighting(x,z,racer={lap:1},course=COURSES.rocky,time=0) {
-  let progress=courseProgress(x,z,course);
-  // Checkpoint state disambiguates the angular seam: the opening run-up
-  // is morning, and approaching a lap line cannot rewind the sky early.
-  if(racer.passed===0)progress=0;
-  else if(racer.finishTime!=null)progress=1;
-  else if(racer.passed>0){
-    if(racer.nextGate===0&&progress<.5)progress=1;
-    if(racer.nextGate===1&&progress>.5)progress=0;
-  }
-  const lap=clamp(racer.lap||1,1,LAPS),raceProgress=(lap-1+progress)/LAPS;
-  const phase=time*Math.PI*2/240,cycle=course.lighting==='cycle';
-  const altitude=cycle?Math.cos(phase):course.lighting==='day'?.8:
+// Each course has its own atmosphere.
+export function courseLighting(racer={passed:0},course=COURSES.rocky) {
+  const raceProgress=clamp((racer.passed-1)/(course.gates.length*LAPS),0,1);
+  const altitude=course.lighting==='day'?.8:
     course.lighting==='night'?-.8:course.lighting==='sunrise'?lerp(-.24,.65,raceProgress):lerp(.24,-.20,raceProgress);
-  const azimuth=1.25+(cycle?phase:(course.lighting==='sunrise'?-1:1)*Math.acos(altitude));
+  const azimuth=1.25+(course.lighting==='sunrise'?-1:1)*Math.acos(altitude);
   return skyLighting(altitude,azimuth);
 }
 function skyLighting(altitude,azimuth){
@@ -28,8 +17,8 @@ function skyLighting(altitude,azimuth){
   const elevation=altitude*.24,horizontal=Math.sqrt(1-elevation*elevation);
   return {altitude,night,twilight,sunDirection:[Math.sin(azimuth)*horizontal,elevation,Math.cos(azimuth)*horizontal]};
 }
-export function easeTitleLighting(previous,target,dt){
-  const f=1-Math.exp(-dt*1.4),altitude=lerp(previous.altitude,target.altitude,f);
+export function easeLighting(previous,target,dt){
+  const f=blend(dt,1.4),altitude=lerp(previous.altitude,target.altitude,f);
   const a=Math.atan2(previous.sunDirection[0],previous.sunDirection[2]);
   const b=Math.atan2(target.sunDirection[0],target.sunDirection[2]);
   return skyLighting(altitude,a+angleDelta(b,a)*f);
@@ -37,58 +26,32 @@ export function easeTitleLighting(previous,target,dt){
 
 // Directions have no translation: a distant sky rotates with the camera but
 // does not slide when the camera moves sideways at the same heading.
-export function projectSkyDirection(view,direction) {
-  const [x,y,z]=direction,w=view[3]*x+view[7]*y+view[11]*z;
-  if(w<=0)return null;
-  return {x:(view[0]*x+view[4]*y+view[8]*z)/w,y:(view[1]*x+view[5]*y+view[9]*z)/w};
-}
 
-// Speed eases the view from a close idle position to a wider, higher chase.
-// Height remains relative to sea level, never to the bobbing or airborne hull.
+
+// Fixed cruising distance and sea-level height, with smooth position and heading.
+// Idle pivots hold the view; any movement above the threshold resumes following.
 export function chaseCamera(state,racer,dt){
   const first=!state.cameraReady;
   if(first){state.cameraYaw=racer.yaw;state.cameraReady=true;}
-  const forward=racer.vx*Math.sin(racer.yaw)+racer.vz*Math.cos(racer.yaw);
-  const moving=clamp((forward-1)/35,0,1),turnFollow=moving*moving*(3-2*moving);
-  const correction=angleDelta(racer.yaw,state.cameraYaw)*(1-Math.exp(-dt*1.15*turnFollow));
-  state.cameraYaw+=clamp(correction,-dt*.7*turnFollow,dt*.7*turnFollow);
-  const speed=clamp((racer.speed-2)/46,0,1),pace=speed*speed*(3-2*speed);
-  state.cameraPace=first?pace:lerp(state.cameraPace,pace,1-Math.exp(-dt*1.2));
-  const behind=8.5+state.cameraPace*4.5,height=5+state.cameraPace*2.25;
+  if(racer.speed>1)state.cameraYaw+=angleDelta(racer.yaw,state.cameraYaw)*blend(dt,1.15);
   const s=Math.sin(state.cameraYaw),c=Math.cos(state.cameraYaw);
-  const wanted=[racer.x-s*behind,height,racer.z-c*behind],follow=1-Math.exp(-dt*5);
-  state.eye=first?wanted:[lerp(state.eye[0],wanted[0],follow),height,lerp(state.eye[2],wanted[2],follow)];
+  const wanted=[racer.x-s*13,7.25,racer.z-c*13];
+  state.eye=first?wanted:state.eye.map((v,i)=>lerp(v,wanted[i],blend(dt,5)));
   const x=racer.x+s*13,z=racer.z+c*13;
-  return [x,height-Math.hypot(x-state.eye[0],z-state.eye[2])*.2,z];
+  return [x,7.25-Math.hypot(x-state.eye[0],z-state.eye[2])*.2,z];
 }
 
 // Freeze the former 30-second-offset orbit at its initial menu view.
 export const TITLE_CAMERA={eye:[255.85,39.92,329.53],target:[125,0,-90]};
 
-export function flareAlignment(sun,aspect){
-  // Keep heading alignment tight while allowing a broader vertical range.
-  const angle=Math.atan(Math.hypot(sun.x*aspect,sun.y*.4)*Math.tan(.99/2));
-  return Math.exp(-((angle/.22)**2));
-}
 
-export const rainbowShader=`
-vec3 spectrum(float t){vec3 c=.5+.5*cos(6.283185*(t+vec3(0.,-.333,.333)));return c*c;}
-vec4 rainbowBand(float band){
- float envelope=smoothstep(0.,.18,band)*(1.-smoothstep(.82,1.,band));
- return vec4(spectrum((1.-clamp(band,0.,1.))*.78),envelope);
-}`;
 
-// Approximate side contact with one water sample and bank/trim height offsets.
-export function hullSprayContact(r,side,station,time,water=waveHeight){
-  const s=Math.sin(r.yaw),c=Math.cos(r.yaw),across=side*.7;
-  const x=r.x+c*across+s*station,z=r.z-s*across+c*station;
-  const height=water(x,z,time),depth=height-r.y-across*Math.sin(DEVELOPMENT?(r.roll||0):r.roll)+station*Math.sin(DEVELOPMENT?(r.pitch||0):r.pitch);
-  return depth<-.45||depth>.32?null:{x,y:height+.05,z};
-}
+
 
 const vertexSource = `
 attribute vec3 aPosition,aNormal,aColor;
 uniform mat4 uView,uModel;
+uniform vec4 uBuoy;
 uniform float uTime,uWater;
 varying vec3 vWorld,vNormal,vColor;
 float waterHeight(vec2 p){
@@ -108,29 +71,33 @@ void main(){
  if(uWater>.5 && uWater<1.5){
   // Settle the detailed patch into a flat ocean before its coarse outer ring.
   float waves=1.-smoothstep(420.,650.,max(abs(aPosition.x),abs(aPosition.z)));
-  p.y=waterHeight(p.xz)*waves;
-  vNormal=normalize(vec3((waterHeight(p.xz-vec2(.3,0.))-waterHeight(p.xz+vec2(.3,0.)))*waves,.6,(waterHeight(p.xz-vec2(0.,.3))-waterHeight(p.xz+vec2(0.,.3)))*waves));
+  float height=waterHeight(p.xz);
+  p.y=height*waves;
+  // Reuse the center height for forward differences along both axes.
+  vNormal=normalize(vec3((height-waterHeight(p.xz+vec2(.3,0.)))*waves,.3,(height-waterHeight(p.xz+vec2(0.,.3)))*waves));
  }
+
  if(uWater>2.5)p.xz+=vec2(sin(uTime*1.3+p.x*.25+p.z*.17),cos(uTime+p.z*.23))*.23;
- vWorld=p.xyz;vColor=aColor;gl_Position=uView*p;
+ vWorld=p.xyz;vColor=aColor.r<0.?uBuoy.rgb*(1.-aColor.g*uBuoy.a):aColor;gl_Position=uView*p;
 }`;
-// One atmosphere palette for the sky, reflected sky, and distance haze.
+// Blend horizon and upper-sky colors, then share one elevation curve across
+// daylight, night, and dusk for the sky, reflections, and distance haze.
 export const skyGradientShader=`
 vec3 skyColor(float elevation){
- vec3 day=mix(vec3(.8,.9,.8),vec3(.4,.7,.7),smoothstep(0.,.75,elevation));
- vec3 night=mix(vec3(.07,.1,.2),vec3(.01,.02,.07),smoothstep(0.,.85,elevation));
- vec3 dusk=mix(vec3(.9,.4,.2),vec3(.2,.09,.3),smoothstep(0.,.65,elevation));
- return mix(mix(day,night,uNight),dusk,uTwilight*.88);
+ return mix(
+  mix(mix(vec3(.8,.9,.8),vec3(.07,.1,.2),uNight),vec3(.9,.4,.2),uTwilight*.88),
+  mix(mix(vec3(.4,.7,.7),vec3(.01,.02,.07),uNight),vec3(.2,.09,.3),uTwilight*.88),
+  smoothstep(0.,.75,elevation));
 }`;
 const fragmentSource = `
 precision highp float;
 uniform vec3 uEye,uLightDirection;
 uniform float uWater,uTime,uNight,uTwilight,uFogScale;
-uniform vec4 uBeacon;
-uniform vec4 uShadows[4];
-uniform vec2 uShadowStyle[4];
+uniform vec3 uBeacon;
+uniform vec2 uShadows[4];
+
 varying vec3 vWorld,vNormal,vColor;
-${rainbowShader}
+
 float foamNoise(vec2 p){
  vec2 cell=floor(p),f=fract(p);f=f*f*(3.-2.*f);
  float a=fract(sin(dot(cell,vec2(127.1,311.7)))*43758.5453);
@@ -139,28 +106,26 @@ float foamNoise(vec2 p){
  float d=fract(sin(dot(cell+vec2(1.),vec2(127.1,311.7)))*43758.5453);
  return mix(mix(a,b,f.x),mix(c,d,f.x),f.y);
 }
+
 ${skyGradientShader}
 void main(){
- if(uWater< -2.5){
-  vec4 band=rainbowBand((length(vColor.xy)-31.65)/7.35);
-  gl_FragColor=vec4(band.rgb,band.a*.55);return;
- }
+
+
  float opacity=1.;
  vec3 light=normalize(uLightDirection),n=normalize(vNormal);
  vec3 color=vColor*mix(vec3(.64+.36*max(0.,dot(n,light))),vec3(.2,.3,.5)+vec3(.3,.4,.5)*max(0.,dot(n,light)),uNight);
  color*=mix(vec3(1.),vec3(1.2,.8,.6),uTwilight*.7);
  if(uWater< -1.5){
-  float reach=distance(vWorld,uBeacon.xyz);
-  gl_FragColor=vec4(vColor,(.025+.09*uNight)*(1.-smoothstep(160.,340.,reach)));return;
+  float reach=distance(vWorld,uBeacon);
+  gl_FragColor=vec4(vColor,(.1+.36*uNight)*(1.-smoothstep(160.,340.,reach)));return;
  }
  if(uWater>.5 && uWater<1.5){
-  float shore=1000.,beachDistance=1000.,shoreDistance=1000.;
+  float shore=1000.,shoreDistance=1000.;
   ${landforms.map(i=>`{
    vec2 local=(vWorld.xz-vec2(${i.x.toFixed(1)},${i.z.toFixed(1)}))/vec2(${i.rx.toFixed(1)},${i.rz.toFixed(1)});
    float radius=length(local),a=atan(local.y,local.x);
    float coast=(radius-(1.+sin(a*5.)*.045+cos(a*7.)*.028)*.945)*${Math.min(i.rx,i.rz).toFixed(1)};
    shore=min(shore,radius);shoreDistance=min(shoreDistance,coast);
-   ${i.rocky?'':'beachDistance=min(beachDistance,coast);'}
   }`).join('\n  ')}
   float depth=smoothstep(.96,1.8,shore);
   vec3 view=normalize(uEye-vWorld),reflected=reflect(-view,n);
@@ -178,29 +143,23 @@ void main(){
   float glint=pow(max(0.,dot(reflected,light)),150.);
   float glow=pow(max(0.,dot(reflected,light)),12.);
   color+=mix(mix(vec3(1.,.9,.8),vec3(.5,.7,1.),uNight),vec3(1.,.5,.2),uTwilight)*(glint*.9+glow*.12);
-  // Foam belongs to the moving water surface, with holes instead of solid paint.
+  // Smooth random noise breaks up crests and shoreline wash.
   float patches=foamNoise(vWorld.xz*.32+vec2(uTime*.24,-uTime*.16));
-  float bubbles=foamNoise(vWorld.xz*1.65+vec2(-uTime*.45,uTime*.3));
-  float texture=smoothstep(.22,.72,patches*.65+bubbles*.35);
+  float texture=smoothstep(.22,.72,patches);
   float crest=smoothstep(1.1,2.35,vWorld.y+(patches-.5)*.8);
   float whitecaps=crest*texture*.92;
-  // Positive time moves constant-phase bands toward decreasing shore distance.
-  // Long curved fronts wrap around the sandy coastline and break up as they wash in.
-  float front=sin(beachDistance*.35+uTime*.85+(patches-.5)*.55);
-  float breaker=smoothstep(.48,.9,front)*smoothstep(-1.,4.,beachDistance)*(1.-smoothstep(28.,52.,beachDistance));
-  float wash=(1.-smoothstep(1.,9.,abs(shoreDistance-1.5-sin(uTime*.85)*1.5)))*(.45+.35*patches);
-  float foam=clamp(max(whitecaps,max(breaker*texture*.9,wash*texture)),0.,1.);
+  float wash=(1.-smoothstep(1.,9.,abs(shoreDistance)))*texture;
+  float foam=clamp(max(whitecaps,wash),0.,1.);
   foam*=1.-smoothstep(160.,360.,distance(uEye,vWorld));
   vec3 foamColor=mix(vec3(.9,1.,.9),vec3(.3,.4,.5),uNight);
   foamColor=mix(foamColor,vec3(.9,.7,.6),uTwilight*.4);
   color=mix(color,foamColor,foam);
   opacity=mix(opacity,1.,foam);
+
   // Shade the water itself: blobs follow its waves without floating or z-fighting.
   for(int i=0;i<4;i++){
-   vec4 shadow=uShadows[i];vec2 delta=vWorld.xz-shadow.xy;
-   vec2 local=vec2(dot(delta,vec2(shadow.w,-shadow.z)),dot(delta,shadow.zw));
-   float radius=length(local/(vec2(2.1,3.6)*uShadowStyle[i].x));
-   float blob=(1.-smoothstep(.12,1.,radius))*uShadowStyle[i].y;
+   float radius=length(vWorld.xz-uShadows[i])/2.8;
+   float blob=(1.-smoothstep(.12,1.,radius))*.64;
    color*=1.-blob;
   }
  }
@@ -211,14 +170,6 @@ void main(){
   float column=max(0.,-vWorld.y)/max(.25,abs(normalize(uEye-vWorld).y));
   color=mix(color,mix(vec3(.06,.4,.4),vec3(.01,.05,.1),uNight),clamp(column*.017,.12,.72));
  }
- // The same rotating prism lights the sea and shore beneath its visible shaft.
- vec3 delta=vWorld-uBeacon.xyz;
- vec2 direction=vec2(sin(uBeacon.w),cos(uBeacon.w));
- float ahead=dot(delta.xz,direction),across=dot(delta.xz,vec2(direction.y,-direction.x))/max(ahead,1.);
- float cone=(1.-smoothstep(.16,.20,abs(across)))*(1.-smoothstep(.045,.075,abs(delta.y/max(ahead,1.)+${((LIGHTHOUSE.y+LIGHTHOUSE.lampHeight-2)/320).toFixed(8)})));
- float beam=cone*smoothstep(0.,15.,ahead)*(1.-smoothstep(240.,340.,ahead));
- vec3 prism=.55+.45*cos(6.28318*(clamp(across/.4+.5,0.,1.)*.8+vec3(0.,-.333,.333)));
- color+=prism*beam*(.18+uNight*.85);
  if(uWater< -.5)color=mix(color,vColor*(.85+.15*max(0.,dot(n,light))),uNight);
  // The next buoy is self-lit in daylight, dusk and darkness.
  if(uWater<0. && uWater>-.5)color=vColor*1.25;
@@ -233,17 +184,11 @@ void main(){
 const skyVertex = `attribute vec2 aPosition;varying vec2 vUv;void main(){vUv=aPosition;gl_Position=vec4(aPosition,.99999,1.);}`;
 const skyFragment = `precision highp float;
 varying vec2 vUv;uniform mat3 uCamera;uniform vec3 uSunDirection;
-uniform float uAspect,uNight,uTime,uTwilight;
+uniform float uAspect,uNight,uTwilight;
 ${skyGradientShader}
 void main(){
  vec3 ray=normalize(uCamera*vec3(vUv*vec2(uAspect,1.)*${Math.tan(.99/2).toFixed(8)},-1.));
  vec3 color=skyColor(ray.y);
- // Spherical coordinates give every star a fixed direction in the world.
- vec2 grid=vec2(atan(ray.z,ray.x)/6.2831853+.5,asin(clamp(ray.y,-1.,1.))/3.1415927+.5)*vec2(420.,210.);
- vec2 cell=floor(grid);cell.x=mod(cell.x,420.);
- float seed=fract(sin(dot(cell,vec2(127.1,311.7)))*43758.5453);
- float stars=step(.968,seed)*(1.-smoothstep(.035,.18,length(fract(grid)-.5)))*smoothstep(0.,.15,ray.y);
- color+=vec3(.7,.8,1.)*stars*(.75+.25*sin(uTime*.7+seed*80.))*uNight*(1.-uTwilight*.88);
  float sunDistance=length(ray-uSunDirection),moonDistance=length(ray+uSunDirection);
  float sunVisible=smoothstep(-.025,.015,uSunDirection.y),moonVisible=smoothstep(-.025,.015,-uSunDirection.y)*uNight;
  float sunDisc=(1.-smoothstep(.038,.041,sunDistance))*sunVisible;
@@ -253,73 +198,30 @@ void main(){
  color+=vec3(.04,.05,.09)*exp(-moonDistance*10.)*moonVisible;
  gl_FragColor=vec4(color,1.);}`;
 
-const flareFragment=`precision mediump float;
-varying vec2 vUv;uniform sampler2D uSource;uniform vec2 uSun;
-uniform float uAspect,uStrength,uTwilight;
-float visible(vec2 uv,vec3 source){
- vec3 pixel=texture2D(uSource,uv).rgb;
- return 1.-smoothstep(.09,.22,length(pixel-source));
-}
-${rainbowShader}
-vec3 rainbowRing(float radius,float center,float width){
- vec4 band=rainbowBand((radius-center)/width+.5);
- return band.rgb*band.a;
-}
-void main(){
- // A tiny copy of the light center provides GPU-only occlusion. Land,
- // craft and waves covering the sun suppress the lens effect.
- vec3 source=mix(vec3(1.,.9,.8),vec3(1.,.6,.2),uTwilight);
- float mask=(visible(vec2(.5),source)+visible(vec2(.15,.5),source)+visible(vec2(.85,.5),source)+visible(vec2(.5,.15),source)+visible(vec2(.5,.85),source))*.2;
- vec2 uv=vUv*vec2(uAspect,1.),sun=uSun*vec2(uAspect,1.);
- // Keep the spectral lens halo, without the sun's warm bloom or starburst.
- vec3 color=rainbowRing(length(uv-sun),.28,.16)*.42;
- // Internal lens reflections lie on the optical axis through the image center.
- // Different aperture sizes and spectral rims suggest coated camera elements.
- for(int i=0;i<6;i++){
-  float f=float(i),size=.045+fract(f*.37+.13)*.13;
-  vec2 q=uv-sun*(.62-f*.43);
-  q=abs(q);
-  float radius=max(q.x,dot(q,vec2(.5,.866025)));
-  float d=radius/size;
-  float ghost=(1.-smoothstep(.65,1.,d))*.15;
-  vec3 tint=spectrum(f*.17+.08);
-  color+=tint*ghost+rainbowRing(d,.88,.44)*.25;
- }
- // A second rainbow lens reflection follows the opposite end of the optical axis.
- vec2 halo=uv+sun*.72;
- float ringRadius=.28;
- color+=rainbowRing(length(halo),ringRadius,.13)*.32;
- float edge=1.-smoothstep(.82,1.,max(abs(uSun.x),abs(uSun.y)));
- gl_FragColor=vec4(color*mask*uStrength*edge,1.);
-}`;
+
 
 export class Renderer {
   constructor(canvas) {
-    this.canvas=canvas;
     this.gl=canvas.getContext('webgl',{antialias:true,alpha:false,powerPreference:'high-performance'});
     if(DEVELOPMENT&&!this.gl) throw Error('WebGL is unavailable.');
     const gl=this.gl;
     this.program=this.makeProgram(vertexSource,fragmentSource);
     this.skyProgram=this.makeProgram(skyVertex,skyFragment);
-    this.flareProgram=this.makeProgram(skyVertex,flareFragment);
-    this.sunTexture=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,this.sunTexture);
-    gl.texImage2D(gl.TEXTURE_2D,0,gl.RGB,9,9,0,gl.RGB,gl.UNSIGNED_BYTE,null);
-    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
-    this.loc=Object.fromEntries(['uView','uModel','uTime','uWater','uLightDirection','uEye','uNight','uTwilight','uFogScale','uBeacon','uShadows[0]','uShadowStyle[0]'].map(k=>[k,gl.getUniformLocation(this.program,k)]));
+    this.loc=Object.fromEntries(['uBuoy','uView','uModel','uTime','uWater','uLightDirection','uEye','uNight','uTwilight','uFogScale','uBeacon','uShadows[0]'].map(k=>[k,gl.getUniformLocation(this.program,k)]));
     this.attr=['aPosition','aNormal','aColor'].map(k=>gl.getAttribLocation(this.program,k));
     this.skyBuffer=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,this.skyBuffer);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,3,-1,-1,3]),gl.STATIC_DRAW);
     this.island=this.upload(createIslandMesh());
-    this.rainbow=null;
+    this.seabed=this.upload(createSeabedMesh());this.seagrass=this.upload(createSeaGrassMesh());
+
     this.lighthouse=this.upload(createLighthouseMesh());this.beacon=this.upload(createBeaconMesh());
     const lamp=new MeshBuilder();lamp.cone(0,-2,0,2.6,2.6,4,rgb('#fff3cc'),12);this.lamp=this.upload(lamp);
-    this.nightBlend=0;this.lighting=courseLighting(0,0);
+    this.nightBlend=0;this.lighting=courseLighting();
     this.crafts=[0,1,2,3].map(i=>this.upload(createCraftMesh(i)));
-    this.gateMeshes=[];
-    this.activeGates=[];
-    this.water=this.makeWater();this.seabed=this.upload(createSeabedMesh());this.seagrass=this.upload(createSeaGrassMesh());
+    this.buoyMesh=this.upload(createBuoyMesh());
 
-    this.shadowUniforms=new Float32Array(16);this.shadowStyle=new Float32Array(8);
+    this.water=this.makeWater();
+
+    this.shadowUniforms=new Float32Array(8);
     this.effectBuffer=gl.createBuffer();this.particles=[];this.rainbowColors=RAINBOW_COLORS.map(rgb);this.particleClock=0;this.random=randomSeed(83);
     this.cameraReady=false;
     gl.enable(gl.DEPTH_TEST);
@@ -366,14 +268,6 @@ export class Renderer {
     this.attr.forEach((a,i)=>{gl.enableVertexAttribArray(a);gl.vertexAttribPointer(a,3,gl.FLOAT,false,36,i*12);});
     gl.uniformMatrix4fv(this.loc.uModel,false,matrix);gl.uniform1f(this.loc.uWater,water);gl.drawArrays(gl.TRIANGLES,0,mesh.count);
   }
-  impact(event){
-    for(let i=0;i<10;i++){
-      const a=this.random()*Math.PI*2,v=2+this.random()*Math.min(8,event.strength*.3);
-      this.particles.push({x:event.x,z:event.z,y:event.y,vx:Math.cos(a)*v,vz:Math.sin(a)*v,vy:2+this.random()*4,
-        life:.5+this.random()*.4,max:.9,size:.15+this.random()*.2});
-    }
-    this.particles=this.particles.slice(-650);
-  }
   updateEffects(race,dt){
     this.particleClock+=dt;
     if(this.particleClock>.065&&(race.phase==='racing'||race.phase==='title')) {
@@ -384,33 +278,18 @@ export class Renderer {
         const strength=clamp((r.speed-8)/40,0,1);
         // Rainbow effects reward the maximum buoy-earned speed level.
         const tint=band=>r.speedLevel===MAX_SPEED_LEVEL?this.rainbowColors[band].map(v=>v**2.2):[.8,.9,.9];
-        for(const side of [-1,1]){
-          const band=Math.floor((race.worldTime*5+side*2+7)%7);
-          this.particles.push({x:x+c*side*.55,z:z-s*side*.55,y:r.y,
-            vx:-s*2+c*side*(1.5+this.random()),vz:-c*2-s*side*(1.5+this.random()),vy:1.3+this.random()*1.8+strength,
-            life:1.2,max:1.2,size:.12+this.random()*.15,color:tint(band)});
-        }
-        // Sheets of droplets peel off approximate side/wave contacts.
-        // Speed controls the spray fan.
-        for(const side of [-1,1])for(const station of [-1.15,0,1.05]){
-          const contact=hullSprayContact(r,side,station,race.worldTime);
-          if(!contact)continue;
-          const hit=clamp(r.speed/50,0,1);
-          for(let i=0;i<(hit>.7?3:2);i++){
-            const life=.35+this.random()*.3,outward=2+hit*3+this.random();
-            this.particles.push({...contact,vx:s*r.speed*.65+c*side*outward,vz:c*r.speed*.65-s*side*outward,
-              vy:1.5+hit*3+this.random(),life,max:life,size:.09+this.random()*.12,
-              sideSpray:true,color:tint(Math.floor((race.worldTime*5+station+side+14)%7))});
-          }
-        }
-        // Disconnected foam flecks, never a solid ribbon.
-        for(let i=0;i<6;i++){
-          const side=i%2?1:-1,across=side*(.3+this.random()*.65),aft=this.random()*2;
-          const life=.65+this.random()*.65;
-          this.particles.push({x:x+c*across-s*aft,z:z-s*across-c*aft,y:0,
-            vx:c*side*(.65+strength),vz:-s*side*(.65+strength),vy:0,
-            life,max:life,size:.16+this.random()*.2,foam:true,
-            color:tint(Math.floor((race.worldTime*5+i)%7))});
+        // Two rear droplets followed by six drifting foam flecks share one
+        // emitter, retaining their random sequence and separate motion rules.
+        for(let i=0;i<8;i++){
+          const foam=i>1,side=i%2?1:-1;
+          const across=side*(foam?.3+this.random()*.65:.55),aft=foam?this.random()*2:0;
+          const life=foam?.65+this.random()*.65:1.2;
+          this.particles.push({x:x+c*across-s*aft,z:z-s*across-c*aft,y:foam?0:r.y,
+            vx:foam?c*side*(.65+strength):-s*2+c*side*(1.5+this.random()),
+            vz:foam?-s*side*(.65+strength):-c*2-s*side*(1.5+this.random()),
+            vy:foam?0:1.3+this.random()*1.8+strength,life,max:life,
+            size:foam?.16+this.random()*.2:.12+this.random()*.15,foam,
+            color:tint(Math.floor((race.worldTime*5+(foam?i-2:side*2+7))%7))});
         }
       }
     }
@@ -418,23 +297,23 @@ export class Renderer {
     for(const p of this.particles){p.life-=dt;p.x+=p.vx*dt;p.z+=p.vz*dt;if(!p.foam){p.vy-=dt*6;p.y+=p.vy*dt;} }
   }
   syncCourse(race){
-    if(this.course===race.course&&this.hideCourseMarkers===!!race.hideCourseMarkers)return;
-    for(const mesh of [...this.gateMeshes,...this.activeGates,this.rainbow])if(mesh)this.gl.deleteBuffer(mesh.buffer);
+    if(this.course===race.course)return;
+
     this.course=race.course;
-    this.hideCourseMarkers=!!race.hideCourseMarkers;
-    this.gateMeshes=race.buoys.map(b=>this.upload(createGateMesh(b.gate,false,b.side,race.course.gates)));
-    this.activeGates=race.buoys.map(b=>this.upload(createGateMesh(b.gate,true,b.side,race.course.gates)));
-    this.rainbow=race.freePlay||race.hideCourseMarkers?null:this.upload(createRainbowMesh(race.course.gates));
+
+
+
     this.particles=[];this.cameraReady=false;
   }
   draw(race,dt){
     this.syncCourse(race);
-    const gl=this.gl,canvas=this.canvas,pixelRatio=Math.min(devicePixelRatio||1,1.7);
+    const gl=this.gl,canvas=this.gl.canvas,pixelRatio=Math.min(devicePixelRatio||1,1.7);
     const player=race.racers[0];
-    const lighting=courseLighting(player.x,player.z,player,race.lightingCourse||race.course,race.worldTime);
-    this.lighting=race.phase==='title'&&this.lightingReady?easeTitleLighting(this.lighting,lighting,dt):lighting;
+    const lighting=courseLighting(player,race.lightingCourse||race.course);
+    const lightingDt=race.phase==='paused'?0:dt;
+    this.lighting=this.lightingReady?easeLighting(this.lighting,lighting,lightingDt):lighting;
     this.lightingReady=true;
-    this.nightBlend=lerp(this.nightBlend,this.lighting.night,1-Math.exp(-dt*3));
+    this.nightBlend=lerp(this.nightBlend,this.lighting.night,blend(lightingDt,3));
     const width=Math.round(canvas.clientWidth*pixelRatio),height=Math.round(canvas.clientHeight*pixelRatio);
     if(canvas.width!==width||canvas.height!==height){canvas.width=width;canvas.height=height;}
     gl.viewport(0,0,width,height);gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
@@ -444,11 +323,13 @@ export class Renderer {
       this.eye=TITLE_CAMERA.eye;target=TITLE_CAMERA.target;this.cameraReady=false;
     } else target=chaseCamera(this,p,dt);
     const camera=lookAt(this.eye,target);
-    this.view=multiply(perspective(.99,width/height,.25,4000),camera);
-    this.sunScreen=projectSkyDirection(this.view,this.lighting.sunDirection);
+    // Fixed perspective times an affine view; retain the projection's Float32 rounding.
+    const f=1/Math.tan(.99/2),nf=1/(.25-4000),projection=new Float32Array([f/(width/height),f,(4000+.25)*nf,2*4000*.25*nf]);
+    this.view=camera.map((v,i)=>i%4===3?-camera[i-1]:projection[i%4]*v+(i===14?projection[3]:0));
+
     gl.disable(gl.DEPTH_TEST);const skyAttr=this.fullscreen(this.skyProgram);
     gl.uniform1f(gl.getUniformLocation(this.skyProgram,'uTwilight'),this.lighting.twilight);
-    gl.uniform1f(gl.getUniformLocation(this.skyProgram,'uNight'),this.nightBlend);gl.uniform1f(gl.getUniformLocation(this.skyProgram,'uTime'),race.worldTime);
+    gl.uniform1f(gl.getUniformLocation(this.skyProgram,'uNight'),this.nightBlend);
     gl.uniformMatrix3fv(gl.getUniformLocation(this.skyProgram,'uCamera'),false,new Float32Array([camera[0],camera[4],camera[8],camera[1],camera[5],camera[9],camera[2],camera[6],camera[10]]));
     gl.uniform3fv(gl.getUniformLocation(this.skyProgram,'uSunDirection'),this.lighting.sunDirection);
     gl.uniform1f(gl.getUniformLocation(this.skyProgram,'uAspect'),width/height);gl.drawArrays(gl.TRIANGLES,0,3);
@@ -459,26 +340,24 @@ export class Renderer {
     const beaconAngle=race.worldTime*.24-1.8,lampY=LIGHTHOUSE.y+LIGHTHOUSE.lampHeight;
     gl.uniform1f(this.loc.uTwilight,this.lighting.twilight);
     gl.uniform1f(this.loc.uFogScale,title?.85:1);
-    gl.uniform1f(this.loc.uNight,this.nightBlend);gl.uniform4f(this.loc.uBeacon,LIGHTHOUSE.x,lampY,LIGHTHOUSE.z,beaconAngle);
-    race.racers.forEach((r,i)=>{
-      const clearance=Math.max(0,r.y-.35-waveHeight(r.x,r.z,race.worldTime));
-      this.shadowUniforms.set([r.x,r.z,Math.sin(r.yaw),Math.cos(r.yaw)],i*4);
-      // Higher craft get a broader, softer shadow while retaining a clear landing cue.
-      this.shadowStyle.set([1+Math.min(clearance,12)*.055,.64/(1+Math.min(clearance,12)*.065)],i*2);
-    });
-    gl.uniform4fv(this.loc['uShadows[0]'],this.shadowUniforms);
-    gl.uniform2fv(this.loc['uShadowStyle[0]'],this.shadowStyle);
+    gl.uniform1f(this.loc.uNight,this.nightBlend);gl.uniform3f(this.loc.uBeacon,LIGHTHOUSE.x,lampY,LIGHTHOUSE.z);
+    race.racers.forEach((r,i)=>this.shadowUniforms.set([r.x,r.z],i*2));
+    gl.uniform2fv(this.loc['uShadows[0]'],this.shadowUniforms);
+
+
+
     this.drawMesh(this.seabed,modelMatrix(),2);this.drawMesh(this.seagrass,modelMatrix(),3);
-    this.drawDynamic(createFishMesh(race.worldTime,p),2);
     this.drawMesh(this.island);
     this.drawMesh(this.lighthouse,modelMatrix(LIGHTHOUSE.x,LIGHTHOUSE.y,LIGHTHOUSE.z));
     this.drawMesh(this.lamp,modelMatrix(LIGHTHOUSE.x,lampY,LIGHTHOUSE.z),-1);
-    this.drawDynamic(createSeagullMesh(race.worldTime));
-    race.buoys.forEach((b,i)=>{
+    race.buoys.forEach(b=>{
       const gate=race.course.gates[b.gate],n=gate.tangent;
       const pitch=b.leanX*n.x+b.leanZ*n.z,roll=-(b.leanX*n.z-b.leanZ*n.x);
       const active=b.gate===p.nextGate&&!title;
-      this.drawMesh(active?this.activeGates[i]:this.gateMeshes[i],modelMatrix(b.x,b.y,b.z,Math.atan2(n.x,n.z),pitch,roll),active?-.25:-1);
+      const model=modelMatrix(b.x,b.y,b.z,Math.atan2(n.x,n.z),pitch,roll);
+      for(let j=0;j<3;j++)model[j]*=b.side;
+      gl.uniform4f(this.loc.uBuoy,...rgb(gate.side>0?'#ff7669':'#66e6ed'),b.gate?0:1);
+      this.drawMesh(this.buoyMesh,model,active?-.25:-1);
     });
     const riders=new MeshBuilder();
     for(const r of race.racers){
@@ -487,8 +366,6 @@ export class Renderer {
       riders.append(createRiderMesh(r),hullMatrix);
     }
     this.drawDynamic(riders);
-    // Opaque submerged geometry first, then the wave surface with depth testing.
-    // Hulls above water keep their depth; submerged parts receive the water tint.
     // The panoramic title camera watches the course, not a moving racer patch.
     const waterMatrix=title?modelMatrix(140,0,-70):modelMatrix(Math.round(p.x/14)*14,0,Math.round(p.z/14)*14);
     // Select the nearest wave surface before blending, so overlapping crests
@@ -505,45 +382,16 @@ export class Renderer {
     const effects=new MeshBuilder();
     for(const p of this.particles){
       const fade=clamp(p.life/p.max,0,1);
-      if(p.foam){
-        const size=p.size*fade*fade,y=waveHeight(p.x,p.z,race.worldTime)+.09;
-        // Flat flecks follow the water at their center and shrink away.
-        effects.triangle([p.x-size,y,p.z-size],[p.x,y,p.z+size],[p.x+size,y,p.z-size],p.color);
-      }
-      else {
-        const size=p.size*fade,y=Math.max(p.y,waveHeight(p.x,p.z,race.worldTime)+.08);
-        const color=p.color?p.color.map(v=>v*(.7+.3*fade)):[.6+fade*.2,.9+fade*.08,.8+fade*.09];
-        effects.triangle([p.x-size,y,p.z],[p.x+size,y,p.z],[p.x,y+size*1.7,p.z+.05],color);
-      }
+      const size=p.size*fade,y=p.foam?waveHeight(p.x,p.z,race.worldTime)+.09:Math.max(p.y,waveHeight(p.x,p.z,race.worldTime)+.08);
+      // Every wake particle is a flat shrinking triangle; droplets retain gravity.
+      effects.triangle([p.x-size,y,p.z-size],[p.x,y,p.z+size],[p.x+size,y,p.z-size],p.color);
     }
     this.drawDynamic(effects,-1);
-    if(this.rainbow){
-      gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);gl.depthMask(false);
-      this.drawMesh(this.rainbow,modelMatrix(),-3);
-      gl.depthMask(true);gl.disable(gl.BLEND);
-    }
     gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE);gl.depthMask(false);
     this.drawMesh(this.beacon,modelMatrix(LIGHTHOUSE.x,lampY,LIGHTHOUSE.z,beaconAngle),-2);
     gl.depthMask(true);gl.disable(gl.BLEND);
-    this.drawLensFlare(width,height);
+
   }
-  drawLensFlare(width,height){
-    const gl=this.gl,light=this.lighting,screen=this.sunScreen;
-    const strength=(1-this.nightBlend)*(1-clamp(-light.altitude*12,0,1))*(screen?flareAlignment(screen,width/height):0);
-    if(strength<.001||width<10||height<10)return;
-    const {x,y}=screen;
-    // Sampling outside the framebuffer is invalid, and a light behind the
-    // camera or outside the viewport must never leave a stuck lens flare.
-    if(Math.abs(x)>1-10/width||Math.abs(y)>1-10/height)return;
-    gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,this.sunTexture);
-    gl.copyTexSubImage2D(gl.TEXTURE_2D,0,0,0,Math.round((x*.5+.5)*width)-4,Math.round((y*.5+.5)*height)-4,9,9);
-    const attr=this.fullscreen(this.flareProgram);
-    gl.uniform1i(gl.getUniformLocation(this.flareProgram,'uSource'),0);
-    gl.uniform2f(gl.getUniformLocation(this.flareProgram,'uSun'),x,y);
-    for(const [name,value] of [['uAspect',width/height],['uStrength',strength],['uTwilight',light.twilight]])gl.uniform1f(gl.getUniformLocation(this.flareProgram,name),value);
-    gl.disable(gl.DEPTH_TEST);gl.depthMask(false);gl.enable(gl.BLEND);gl.blendFunc(gl.ONE,gl.ONE);
-    gl.drawArrays(gl.TRIANGLES,0,3);
-    gl.disableVertexAttribArray(attr);gl.disable(gl.BLEND);gl.depthMask(true);gl.enable(gl.DEPTH_TEST);
-  }
+
 
 }

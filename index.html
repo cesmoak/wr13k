@@ -1,31 +1,29 @@
-<!doctype html>
-<html lang="en">
+﻿<!doctype html>
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#eaf0d8">
   <meta name="description" content="Three sunlit islands. An open throttle. A completely procedural jet-ski racer.">
-  <title>Sunwake Rush — Ride the spectrum</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <canvas id="game"></canvas>
-  <main id="title-screen" class="title-screen">
+  <main id="title-screen">
     <div class="hero-copy">
-      <h1>SUNWAKE<br><span>RUSH</span></h1>
-      <div class="course-menu" role="group"></div>
-      <h2 id="finish-title" hidden>Race complete</h2>
+      <h1>SUNWAKE<br>RUSH</h1>
+      <div class="course-menu"></div>
+      <h2 id="finish-title" hidden></h2>
       <div id="result-list" hidden></div>
-      <button id="start" class="primary">START</button>
-      <button id="course-menu" class="secondary" hidden>COURSES</button>
+      <button id="start">START</button>
+      <button id="course-menu" hidden>COURSES</button>
     </div>
   </main>
   <section id="hud" hidden>
-    <div class="race-top"><div class="position"><span class="small-label">POSITION</span><div><b id="position">4</b><span>/ 4</span></div></div><div class="race-stat"><span class="small-label">RACE TIME</span><b id="timer">00:00.00</b></div></div>
-    <div class="map-panel"><canvas id="map" width="300" height="228"></canvas></div>
-    <div class="telemetry"><div id="miss-counter" role="status"><span>MISSED BUOYS</span><b id="misses">0 / 5</b></div><div id="speed-level" class="speed-level" role="status"><div class="speed-level-label"><span>SPEED LEVEL</span><b id="speed-level-value">1 / 5</b></div><div class="speed-level-bars"></div></div><div class="speed"><b id="speed">0</b><span>KM/H</span></div></div>
+    <p class="hud-item"><span>POSITION / 4</span><b id="position"></b></p>
+    <p class="hud-item"><span>RACE TIME</span><b id="timer"></b></p>
+    <p class="hud-item" id="miss-counter"><span>MISSED BUOYS</span><b id="misses"></b></p>
+    <p class="hud-item"><span>SPEED LEVEL</span><b id="speed-level-value"></b></p>
+    <p class="hud-item"><span>KM/H</span><b id="speed"></b></p>
+
   </section>
-  <div id="countdown" hidden>3</div>
+  <div id="countdown" class="hud-item" hidden></div>
   <script type="module" src="src/main.js"></script>
 </body>
-</html>

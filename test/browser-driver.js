@@ -1,7 +1,7 @@
 import { gameState } from '../src/main.js';
 import { aiInput, checkGate } from '../src/simulation.js';
 import { resetBoat } from '../src/boat-physics.js';
-import { LAPS, COURSES } from '../src/course.js';
+import { LAPS, COURSES, RACER_COLORS } from '../src/course.js';
 
 // Exercise the real input listeners and UI; this file is never packaged.
 const {race,renderer}=gameState,held=new Set(),results=[];
@@ -64,8 +64,7 @@ async function runLevels(){
   for(let i=0;i<5;i++){
     crossFixture();await delay(100);
     const expected=Math.min(5,i+2);
-    check(document.getElementById('speed-level-value').textContent===`${expected} / 5`&&
-      Number(document.getElementById('speed-level').style.getPropertyValue('--level'))===expected,`Clean buoy displays level ${expected} and matching bars`);
+    check(document.getElementById('speed-level-value').textContent===`${expected} / 5`,`Clean buoy displays numeric level ${expected}`);
   }
   await delay(2500);
   const p=race.racers[0],passed=p.passed;crossFixture(race.course.gates[p.nextGate].side*(race.course.gates[p.nextGate].width+5));await delay(100);
@@ -80,10 +79,16 @@ async function runLevels(){
   check(race.phase==='lost'&&race.racers[0].misses===5,'Removed restart shortcuts leave the loss screen unchanged');
   document.getElementById('course-menu').click();await delay(100);document.getElementById('start').click();await delay(100);
   check(document.getElementById('speed-level-value').textContent==='1 / 5'&&race.racers[0].misses===0,'Starting from Courses clears misses and the speed chain');
-  check(renderer.gl.getError()===renderer.gl.NO_ERROR,'Transparent water scene has no WebGL errors');
-  race.racers.forEach((r,i)=>r.finishTime=90+i);race.phase='finished';await delay(100);
+  check(renderer.gl.getError()===renderer.gl.NO_ERROR,'Opaque water scene has no WebGL errors');
+  race.racers.forEach((r,i)=>r.finishTime=[92,null,90,94][i]);race.phase='finished';await delay(100);
   check(!document.getElementById('title-screen').hidden&&document.getElementById('finish-title').textContent==='Race complete'&&document.getElementById('start').hidden,'Finished race uses the shared panel without a start/resume action');
   check(!document.getElementById('result-list').hidden&&document.getElementById('result-list').children.length===4,'Shared results panel lists all four racers');
+  const rows=[...document.getElementById('result-list').children],order=[2,0,3,1];
+  check(rows.every((row,i)=>{
+    const color=document.createElement('div');color.style.color=RACER_COLORS[order[i]];
+    return row.children.length===0&&row.style.color===color.style.color;
+  }),'Results use each racer’s color on its time, without ranks, names or squares');
+  check(rows.map(row=>row.textContent).join(',')==='01:30.00,01:32.00,01:34.00,ON COURSE'&&rows[1].classList.contains('you'),'Results retain sorted times, unfinished status, and player emphasis');
   document.getElementById('course-menu').click();await delay(100);
   check(race.phase==='title'&&document.getElementById('finish-title').hidden&&document.getElementById('result-list').hidden&&!document.getElementById('start').hidden&&document.getElementById('start').textContent==='START','Returning to Courses restores the shared title panel');
   report(results.join('\n')+'\nSPEED LEVEL CHECKS COMPLETE');
@@ -91,85 +96,116 @@ async function runLevels(){
 async function runInteractions(){
   auto=false;release();results.length=0;
   await startFromMenu();race.phase='racing';await delay(100);
-  const p=race.racers[0],b=race.buoys[2];
+  const p=race.racers[0],b=race.buoys[2],anchor=[b.x,b.z];
   Object.assign(p,{x:b.x-7,z:b.z,yaw:Math.PI/2,vx:35,vz:0,speed:35,nextGate:b.gate});
   resetBoat(p,race.worldTime);key('KeyW',true);await delay(300);release();
   check(p.impactCooldown>0&&p.vx<35,'Driving into a buoy deflects the craft');
-  check(Math.hypot(b.x-b.anchorX,b.z-b.anchorZ)>.1,'Buoy recoils from its anchor');
-  await delay(200);check(Math.abs(b.leanX)+Math.abs(b.leanZ)>.01,'Buoy visibly tilts after impact');
-  check(renderer.particles.length>0,'Impact and water spray render');
-  const opponent=race.racers[1],x=b.anchorX+20,z=b.anchorZ-12;
+  check(b.x===anchor[0]&&b.z===anchor[1],'Buoy stays anchored through impact');
+  await delay(200);check(Math.abs(b.leanX)+Math.abs(b.leanZ)>.01,'Anchored buoy follows the wave slope');
+  check(renderer.particles.length>0&&renderer.particles.every(p=>p.color),'Wake spray remains without collision bursts');
+  const opponent=race.racers[1],x=b.x+20,z=b.z-12;
   Object.assign(p,{x:x-2,z,yaw:Math.PI/2,vx:25,vz:0,speed:25,impactCooldown:0});
   Object.assign(opponent,{x:x+2,z,yaw:-Math.PI/2,vx:-25,vz:0,speed:25,impactCooldown:0});
   resetBoat(p,race.worldTime);resetBoat(opponent,race.worldTime);
   await delay(120);
   check(p.impactCooldown>0&&opponent.impactCooldown>0,'Both racers register a physical collision');
   check(p.vx<25&&opponent.vx> -25,'Racer impact transfers momentum');
-  check(Math.abs(p.rider.x)+Math.abs(p.rider.z)>.001,'Rider reacts independently to the bump');
+  check(Number.isFinite(p.speed)&&Number.isFinite(opponent.speed),'Collision velocities remain finite');
   check(renderer.gl.getError()===renderer.gl.NO_ERROR,'Collision scene has no WebGL errors');
   report(results.join('\n')+'\nCOLLISION CHECKS COMPLETE');
 }
 async function runModes(){
   auto=false;release();results.length=0;
-  courseButton('free').click();await delay(100);
+  if(race.phase!=='title'){
+    if(race.phase==='racing'||race.phase==='countdown')tap('Escape');
+    document.getElementById('course-menu').click();
+  }
+  courseButton('main').click();await delay(100);
+  check(document.querySelector('.course-menu').children.length===4,'Exactly four race courses');
   const demo=gameState.titleRace,positions=demo.racers.map(r=>({x:r.x,z:r.z}));await delay(400);
-  check(demo.racers.length===4&&demo.course.id==='main','Free-play title previews four riders on main-loop lines');
+  check(demo.racers.length===4&&demo.course.id==='main','Title previews four riders on main-loop lines');
   check(demo.racers.every((r,i)=>Math.hypot(r.x-positions[i].x,r.z-positions[i].z)>1),'All four title riders are moving');
-  check(race.time===0&&race.racers[0].passed===0,'Title racing does not advance the actual game');
-  check(demo.buoys.length===0&&renderer.gateMeshes.length===0&&renderer.rainbow===null,'Free-play title shows riders without buoys or start arch');
-  document.getElementById('start').click();await delay(100);
-  check(race.freePlay&&race.phase==='racing'&&race.racers.length===4,'Free play starts immediately with four riders');
-  check(race.buoys.length===0&&renderer.gateMeshes.length===0&&renderer.rainbow===null,'Free play has no buoys or start line geometry');
-  check(getComputedStyle(document.querySelector('.race-top')).display==='none'&&getComputedStyle(document.getElementById('miss-counter')).display==='none','Free play hides lap/time and miss HUD');
-  key('KeyW',true);await delay(1300);release();
-  check(race.racers[0].speed>10&&race.time===0&&race.racers[0].passed===0,'Free play drives without race progress');
-  check(race.racers.slice(1).every(r=>r.speed>10),'All three other riders cruise in Free play');
-  tap('Escape');await delay(100);check(race.phase==='paused','Free play pauses');
-  document.getElementById('course-menu').click();await delay(100);check(race.phase==='title','Pause menu returns to course selection');
+  check(demo===race&&race.phase==='title'&&race.events.length===0,'Title reuses the selected race without feedback events');
+  check(demo.buoys.length===11&&renderer.buoyMesh.count>0,'Title shows main-island buoys');
   for(const [id,count] of [['main',10],['reverse',16],['rocky',18],['sunrise',18]]){
-    const titleTime=gameState.titleRace.worldTime,eye=[...renderer.eye];
-    courseButton(id).click();await delay(100);
-    check(gameState.titleRace.worldTime>=titleTime&&gameState.titleRace.worldTime<titleTime+.5,`${id} preserves the camera and lighthouse clock`);
+    const eye=[...renderer.eye],mesh=renderer.buoyMesh;
+    courseButton(id).click();
+    check(gameState.titleRace===race&&race.worldTime===0&&renderer.particles.length===0,`${id} selection resets the shared preview and trails`);
+    await delay(100);
+    check(race.worldTime>0&&race.phase==='title',`${id} preview advances`);
     check(renderer.eye.every((v,i)=>v===eye[i]),`${id} keeps the title camera fixed`);
-    check(race.course.id===id&&race.course.gates.length===count&&race.buoys.length===count+1,`${id} loads its own buoy layout`);
-    check(renderer.gateMeshes.length===count+1&&!document.body.classList.contains('free-play'),`${id} rebuilds markers and restores racing HUD`);
+    check(renderer.buoyMesh===mesh&&renderer.course===COURSES[id],`${id} uses selected-course preview markers`);
+    check(race.course.id===id&&race.course.gates.length===count&&race.buoys.length===count+1,`${id} prepares its own race layout`);
     document.getElementById('start').click();await delay(100);
     check(race.phase==='countdown'&&race.racers.length===4,`${id} starts a four-rider race`);
+    check(renderer.buoyMesh===mesh&&renderer.course===race.course,`${id} displays the selected race markers`);
+    check(race.time===0&&race.racers.every(r=>r.passed===0&&r.misses===0&&r.speedLevel===1)&&!race.attract,`${id} resets demonstration progress and enables normal race rules`);
     const countdown=race.countdown;tap('KeyR');await delay(100);
     check(race.course.id===id&&race.countdown<countdown,`${id} countdown continues when R is pressed`);
     tap('Escape');document.getElementById('course-menu').click();await delay(100);
+    check(gameState.titleRace===race&&race.phase==='title'&&renderer.course===COURSES[id]&&renderer.buoyMesh.count>0,`${id} returns to its selected-course preview`);
   }
   check(renderer.gl.getError()===0,'Course switching has no WebGL errors');
   report(results.join('\n')+'\nMODE CHECKS COMPLETE');
 }
 async function runPacing(){
   auto=false;release();results.length=0;
-  courseButton('free').click();await delay(100);
-  document.getElementById('start').click();key('KeyW',true);await delay(800);
-  let rawLast,viewLast,rawRepeats=0,viewRepeats=0,count=0;
-  const start=performance.now();
-  await new Promise(resolve=>{
-    function sample(now){
-      const r=race.racers[0],v=gameState.presentation.view.racers[0];
-      if(rawLast&&r.speed>8){
-        count++;if(Math.hypot(r.x-rawLast.x,r.z-rawLast.z)<1e-9)rawRepeats++;
-        if(Math.hypot(v.x-viewLast.x,v.z-viewLast.z)<1e-9)viewRepeats++;
-      }
-      rawLast={x:r.x,z:r.z};viewLast={x:v.x,z:v.z};
-      if(now-start<2500)requestAnimationFrame(sample);else resolve();
-    }requestAnimationFrame(sample);
-  });
-  release();const fps=count/((performance.now()-start)/1000);
+  await startFromMenu();race.phase='racing';
+  race.racers.length=1;Object.assign(race.racers[0],{x:-350,z:350,yaw:0});
+  key('KeyW',true);await delay(800);
+  let last,repeats=0,count=0,elapsed=0;
+  const draw=renderer.draw,start=performance.now();
+  renderer.draw=function(scene,dt){
+    const r=scene.racers[0];
+    if(last&&r.speed>8){
+      count++;if(Math.hypot(r.x-last.x,r.z-last.z)<1e-9)repeats++;
+    }
+    last={x:r.x,z:r.z};elapsed+=dt;
+    return draw.call(this,scene,dt);
+  };
+  try{await delay(2500);}finally{renderer.draw=draw;release();}
+  const seconds=(performance.now()-start)/1000,fps=count/seconds;
   check(count>60,'Frame-pacing sample has enough moving frames');
-  check(viewRepeats<Math.max(2,count*.03),'Rendered craft advances on each moving frame');
-  if(fps>90)check(rawRepeats>count*.2&&viewRepeats<rawRepeats*.1,'Interpolation removes repeated 60 Hz poses on a high-refresh display');
-  check(renderer.gl.getError()===0,'Interpolated scene has no WebGL errors');
-  report(results.join('\n')+`\nFRAME PACING ${fps.toFixed(1)} fps · raw repeats ${rawRepeats}/${count} · rendered repeats ${viewRepeats}/${count}`);
+  check(fps<=61,'Rendering stays capped at 60 Hz');
+  check(repeats<Math.max(2,count*.03),'Rendered craft advances on each moving frame');
+  check(Math.abs(elapsed-seconds)<.15,'Camera and effects track elapsed simulation time');
+  check(renderer.gl.getError()===0,'60 Hz scene has no WebGL errors');
+  report(results.join('\n')+`\nFRAME PACING ${fps.toFixed(1)} fps · repeated poses ${repeats}/${count}`);
 }
+async function runCamera(){
+  auto=false;release();results.length=0;report('Running camera checks…');
+  try{
+    await startFromMenu();
+    for(const opponent of race.racers.slice(1))opponent.finishTime=0;
+    await delay(200);
+    check(renderer.eye[1]===7.25,'Title-to-race transition resets camera height');
+    const p=race.racers[0];
+    check(Math.abs(Math.hypot(renderer.eye[0]-p.x,renderer.eye[2]-p.z)-13)<.05,'Countdown starts 13 units behind the craft');
+    await delay(3800);
+    check(race.phase==='racing','Race starts with the simplified camera');
+    key('KeyW',true);await delay(2200);
+    check(p.speed>10&&renderer.eye[1]===7.25,'Acceleration keeps the fixed sea-level height');
+    const yaw=renderer.cameraYaw;
+    key('KeyA',true);key('KeyS',true);await delay(900);release();
+    check(renderer.cameraYaw>yaw+.05&&renderer.eye[1]===7.25,'Braking turn smoothly follows the craft without changing height');
+    key('KeyS',true);
+    for(let i=0;i<80&&p.speed>1;i++)await delay(100);
+    key('KeyS',false);
+    check(p.speed<=1,'Braking returns below the camera heading threshold');
+    const heldYaw=renderer.cameraYaw,boatYaw=p.yaw;
+    key('KeyD',true);await delay(700);key('KeyD',false);
+    check(Math.abs(p.yaw-boatYaw)>.05&&renderer.cameraYaw===heldYaw,'Stopped pivot turns the hull while holding the view');
+    check(renderer.eye.every(Number.isFinite)&&renderer.gl.getError()===renderer.gl.NO_ERROR,'Camera remains finite and WebGL stays healthy');
+    tap('Escape');await delay(100);document.getElementById('course-menu').click();await delay(100);
+    check(renderer.eye[1]===39.92,'Returning to Courses restores the fixed title view');
+    report(results.join('\n')+'\nPASS — '+results.length+' camera checks.');
+  }finally{release();}
+}
+
 window.addEventListener('message',e=>{
   if(e.origin!==location.origin)return;
   if(e.data.prismTest==='pacing')runPacing().catch(error=>report(results.join('\n')+'\nERROR '+error.message));
-  const action=e.data.prismTest==='start'?run:e.data.prismTest==='levels'?runLevels:e.data.prismTest==='interactions'?runInteractions:e.data.prismTest==='modes'?runModes:null;
+  const action=e.data.prismTest==='start'?run:e.data.prismTest==='levels'?runLevels:e.data.prismTest==='interactions'?runInteractions:e.data.prismTest==='modes'?runModes:e.data.prismTest==='camera'?runCamera:null;
   if(action)action().catch(error=>report(results.join('\n')+'\nERROR '+error.message));
 });
 

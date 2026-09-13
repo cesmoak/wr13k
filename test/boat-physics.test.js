@@ -88,10 +88,6 @@ test('rider inertia, anchored limbs, and rider weight affect the hull',()=>{
   const r=run(boat(),1,{throttle:1,steer:1});
   assert.ok(Math.abs(r.rider.x)+Math.abs(r.rider.z)>.01);
   for(const limb of riderPose(r).limbs){
-    assert.ok(Math.abs(separation(limb.hip,limb.knee)-.55)<.005);
-    assert.ok(Math.abs(separation(limb.knee,limb.foot)-.55)<.005);
-    assert.ok(Math.abs(separation(limb.shoulder,limb.elbow)-.55)<.005);
-    assert.ok(Math.abs(separation(limb.elbow,limb.hand)-.55)<.005);
     assert.equal(limb.foot[1],.64);assert.deepEqual(limb.hand,handlebarPose(r).grips[limb.hand[0]<0?0:1]);
   }
   const centered=boat(),leaning=boat();leaning.rider.x=.4;
@@ -103,12 +99,12 @@ test('visual wakes do not alter water forces',()=>{
   assert.equal(waveHeight(6,0,t,wakes),waveHeight(6,0,t));
   assert.deepEqual(sampleWater(6,0,t,wakes),sampleWater(6,0,t));
 });
-test('extreme rider motion cannot stretch the arms off their handlebar anchors',()=>{
+test('extreme rider motion keeps hands attached to the handlebar',()=>{
   const r=boat();Object.assign(r.rider,{x:.48,y:.16,z:-.27,vx:8,vy:4,vz:-8});
   stepBoat(r,{},1/60,1/60,flatWater);
   for(const limb of riderPose(r).limbs){
-    assert.ok(Math.abs(separation(limb.shoulder,limb.elbow)-.55)<.005);
-    assert.ok(Math.abs(separation(limb.elbow,limb.hand)-.55)<.005);
+    assert.deepEqual(limb.hand,handlebarPose(r).grips[limb.hand[0]<0?0:1]);
+    assert.ok(limb.elbow.every(Number.isFinite));
   }
 });
 test('substeps stay consistent across frame rates and boat reset clears spring energy',()=>{
@@ -178,7 +174,8 @@ test('steering pole lifts without yaw while hands follow the fixed crossbar',()=
     assert.ok(Math.abs(separation(lifted.pivot,lifted.center)-separation(initial.pivot,initial.center))<1e-6);
     for(const [i,l] of riderPose(r).limbs.entries())assert.deepEqual(l.hand,lifted.grips[i]);
     resetBoat(r,0);
-    for(const key of ['handlePitch','handlePitchRate'])assert.equal(r.rider[key],0);
+    assert.equal(r.rider.handlePitch,0);
+    assert.ok(!('handlePitchRate' in r.rider));
     assert.ok(!('handleYaw' in r.rider)&&!('handleYawRate' in r.rider));
   }
 });
@@ -193,11 +190,12 @@ test('neutral rider has a hip hinge, raised elbows, and knees above planted boot
 });
 test('upper body keeps zero sideways tilt across hull rotations, heading, and stale roll state',()=>{
   const r=boat();
-  for(const yaw of [-2.7,0,1.4])for(const pitch of [-.75,0,.75])for(const roll of [-.85,0,.85]){
+  for(const yaw of [-2.7,0,1.4])for(const pitch of [-.75,0,.75])for(const roll of [-.85,0,.85])
+    for(const height of [-.38,0,.28])for(const lean of [-.24,0,.24]){
     Object.assign(r,{yaw,pitch,roll});
-    Object.assign(r.rider,{pitch:.08,roll:.38});
+    Object.assign(r.rider,{pitch:lean,y:height,roll:.38});
     const world=multiply(modelMatrix(0,0,0,yaw,pitch,roll),riderPose(r).torsoMatrix);
-    const expected=modelMatrix(0,0,0,yaw,RIDER_LEAN+.08,0);
+    const expected=modelMatrix(0,0,0,yaw,RIDER_LEAN+lean+Math.max(0,height)*.35,0);
     for(const i of [0,1,2,4,5,6,8,9,10])assert.ok(Math.abs(world[i]-expected[i])<1e-6,'Resting lean stays independent of hull tilt');
   }
 });
@@ -235,8 +233,7 @@ test('rider shifts inward through both turns without sideways tilt and smoothly 
     for(const l of p.limbs){
       assert.deepEqual(l.foot,[Math.sign(l.foot[0])*.43,.64,-.35]);
       assert.deepEqual(l.hand,handlebarPose(r).grips[l.hand[0]<0?0:1]);
-      for(const [a,b,length] of [[l.hip,l.knee,.55],[l.knee,l.foot,.55],[l.shoulder,l.elbow,.55],[l.elbow,l.hand,.55]])
-        assert.ok(Math.abs(separation(a,b)-length)<.00001);
+      assert.ok([...l.knee,...l.elbow].every(Number.isFinite));
     }
     const before=r.rider.x;r.steer=0;
     springRider(r,0,0,0,1/240);
@@ -246,16 +243,18 @@ test('rider shifts inward through both turns without sideways tilt and smoothly 
     assert.ok(separation(riderPose(r).hips,riderPose(boat()).hips)<.001,'Pose returns to its supported resting stance');
   }
 });
-test('crouching stance preserves bent, fixed-length limbs at extreme hull and rider poses',()=>{
+test('fixed-length limbs stay bent and anchored at extreme hull and rider poses',()=>{
   const r=boat();
   for(const pitch of [-.75,0,.75])for(const roll of [-.85,0,.85])
   for(const x of [-.48,.48])for(const y of [-.38,.28])for(const z of [-.27,.25])for(const lean of [-.24,.24])for(const handlePitch of [-.12,.24]){
     Object.assign(r,{pitch,roll,yaw:1.7});Object.assign(r.rider,{x,y,z,pitch:lean,roll:-lean*.38/.24,handlePitch});
     for(const l of riderPose(r).limbs){
-      for(const [a,b,length] of [[l.hip,l.knee,.55],[l.knee,l.foot,.55],[l.shoulder,l.elbow,.55],[l.elbow,l.hand,.55]])
-        assert.ok(Math.abs(separation(a,b)-length)<.00001,'Limb segment retains its length');
-      assert.ok(separation(l.hip,l.foot)<1.08,'Knees retain flexion');
-      assert.ok(separation(l.shoulder,l.hand)<1.05,'Elbows retain flexion');
+      assert.ok([...l.knee,...l.elbow].every(Number.isFinite));
+      for(const [a,joint,b] of [[l.hip,l.knee,l.foot],[l.shoulder,l.elbow,l.hand]]){
+        assert.ok(Math.abs(separation(a,joint)-.55)<1e-6,'Upper segment keeps its length');
+        assert.ok(Math.abs(separation(joint,b)-.55)<1e-6,'Lower segment keeps its length');
+        assert.ok(separation(a,joint)+separation(joint,b)>separation(a,b)+.001,'Joint stays visibly bent');
+      }
       assert.deepEqual(l.foot,[Math.sign(l.foot[0])*.43,.64,-.35]);
       assert.deepEqual(l.hand,handlebarPose(r).grips[l.hand[0]<0?0:1]);
     }
@@ -273,5 +272,14 @@ test('equal-length joint solver remains finite at degenerate and unreachable end
     assert.ok(joint.every(Number.isFinite));
     assert.ok(Math.abs(separation(a,joint)-.55)<1e-9);
     if(separation(a,b)<=1.099)assert.ok(Math.abs(separation(joint,b)-.55)<1e-6);
+  }
+});
+
+
+test('steering pole follows suspension through compression and extension without extra lag',()=>{
+  for(const y of [-.38,-.1,0,.1,.28]){
+    const r=boat();r.rider.y=y;springRider(r,0,0,0,0);
+    assert.equal(r.rider.handlePitch,Math.max(-.12,Math.min(.24,y*(y>0?1.7:.3))));
+    const pose=riderPose(r);for(const [i,limb] of pose.limbs.entries())assert.deepEqual(limb.hand,handlebarPose(r).grips[i]);
   }
 });

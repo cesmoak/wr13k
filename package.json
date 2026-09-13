@@ -10,13 +10,14 @@
     "preview": "node scripts/serve.mjs dist",
     "check:size": "node scripts/size.mjs",
     "test": "node --test test/*.test.js",
-    "courses": "node scripts/racing-lines.mjs"
+    "courses": "node scripts/course-codes.mjs && node scripts/racing-lines.mjs"
   },
   "devDependencies": {
     "@gfx/zopfli": "1.0.15",
     "acorn": "8.18.0",
     "clean-css": "5.3.3",
     "html-minifier-terser": "7.2.0",
+    "roadroller": "2.1.0",
     "terser": "5.51.2"
   }
 }

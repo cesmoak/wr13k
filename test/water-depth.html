@@ -11,7 +11,7 @@ class Preview extends Renderer{
   if(prepass)gl.disable(gl.POLYGON_OFFSET_FILL);
  }
 }
-const renderer=new Preview(document.querySelector('canvas')),race=createRace('free');race.phase='title';race.worldTime=12;race.lightingCourse={...race.course,lighting:'day'};
+const renderer=new Preview(document.querySelector('canvas')),race=createRace('main');race.buoys=[];race.phase='title';race.worldTime=12;race.lightingCourse={...race.course,lighting:'day'};
 TITLE_CAMERA.eye=[0,8,125];TITLE_CAMERA.target=[0,0,80];
 document.querySelector('#offset').onclick=e=>{bias=!bias;e.target.textContent='Depth bias: '+(bias?'on':'off');};
 document.querySelector('#freeze').onclick=()=>frozen=!frozen;

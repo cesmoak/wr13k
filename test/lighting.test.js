@@ -1,123 +1,62 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { coursePoint, courseProgress, COURSES, RAINBOW_COLORS } from '../src/course.js';
-import { hullSprayContact, Renderer, courseLighting, projectSkyDirection, easeTitleLighting, flareAlignment } from '../src/renderer.js';
-import { lookAt, multiply, perspective } from '../src/math.js';
+import { COURSES, RAINBOW_COLORS } from '../src/course.js';
+import { Renderer, courseLighting, easeLighting } from '../src/renderer.js';
 import { rgb } from '../src/mesh.js';
 
-test('angular lighting progress follows both changing-light courses continuously across three laps',()=>{
+test('checkpoint lighting spans three laps monotonically and clamps before start and after finish',()=>{
   for(const id of ['reverse','sunrise']){
-    const course=COURSES[id];let last=null;
-    for(let lap=1;lap<=3;lap++)for(let i=0;i<1000;i++){
-      const p=coursePoint(i/1000,course),progress=courseProgress(p.x,p.z,course);
-      assert.ok(progress>=0&&progress<1);
-      const light=courseLighting(p.x,p.z,{lap},course);
-      if(last!==null){
-        const change=(light.altitude-last)*(id==='sunrise'?1:-1);
-        assert.ok(change>=-1e-12&&change<.003,`${id}: continuous forward lighting at lap ${lap}, sample ${i}`);
-      }
+    const course=COURSES[id],total=course.gates.length*3;
+    let last=courseLighting({passed:0},course).altitude;
+    assert.equal(courseLighting({passed:1},course).altitude,last,'Crossing the start line begins progress at zero');
+    for(let passed=1;passed<=total+1;passed++){
+      const light=courseLighting({passed},course);
+      assert.ok((light.altitude-last)*(id==='sunrise'?1:-1)>=-1e-12);
       last=light.altitude;
     }
+    assert.ok(Math.abs(last-(id==='sunrise'?.65:-.2))<1e-12);
+    assert.deepEqual(courseLighting({passed:total+100},course),courseLighting({passed:total+1},course));
+    assert.deepEqual(courseLighting({passed:-10},course),courseLighting({passed:0},course));
   }
 });
 
-test('angular progress starts at zero and is independent of distance from the course center',()=>{
+test('moving around a checkpoint or changing lap metadata cannot rewind daylight',()=>{
   for(const course of Object.values(COURSES)){
-    const [x,z]=course.points[0];
-    assert.equal(courseProgress(x,z,course),0);
-    const [cx,cz]=course.progressCenter;
-    for(const t of [.2,.5,.8]){
-      const p=coursePoint(t,course),expected=courseProgress(p.x,p.z,course);
-      for(const radius of [.5,1.5,3])assert.ok(Math.abs(courseProgress(cx+(p.x-cx)*radius,cz+(p.z-cz)*radius,course)-expected)<1e-12);
+    const expected=courseLighting({passed:course.gates.length},course);
+    for(const x of [-1000,0,1000])for(const z of [-1000,0,1000])for(const lap of [1,2,3]){
+      assert.deepEqual(courseLighting({x,z,lap,passed:course.gates.length},course),expected);
     }
   }
 });
 
-test('main stays in daylight, rocky stays at night, and reverse fades from sunset to dusk',()=>{
+test('main stays in daylight and rocky stays at night throughout all checkpoints',()=>{
   for(const [id,night] of [['main',0],['rocky',1]]){
     const course=COURSES[id];
-    for(const lap of [1,2,3])for(const t of [0,.5,.9999]){
-      const p=coursePoint(t,course),l=courseLighting(p.x,p.z,{lap},course,180);
-      assert.equal(l.night,night);
-    }
+    for(let passed=0;passed<=course.gates.length*3+1;passed++)assert.equal(courseLighting({passed},course).night,night);
   }
-  const course=COURSES.reverse;let last=1;
-  for(const lap of [1,2,3])for(const t of [0,.25,.5,.75,.9999]){
-    const p=coursePoint(t,course),l=courseLighting(p.x,p.z,{lap},course);
-    assert.ok(l.altitude<=last+.001);last=l.altitude;
-  }
-  const p=coursePoint(0,course);
-  assert.equal(courseLighting(p.x,p.z,{lap:1,passed:0},course).altitude,.24);
-  const finish=courseLighting(p.x,p.z,{lap:3,passed:49,finishTime:130},course);
-  assert.ok(Math.abs(finish.altitude+.2)<1e-12);
 });
 
-test('reverse sunset remains continuous over lap seams',()=>{
-  const course=COURSES.reverse,before=coursePoint(.9999,course),after=coursePoint(.0001,course);
-  for(const lap of [1,2]){
-    const a=courseLighting(before.x,before.z,{lap},course);
-    const b=courseLighting(after.x,after.z,{lap:lap+1},course);
-    assert.ok(Math.abs(a.altitude-b.altitude)<.001);
-  }
-  const end=courseLighting(after.x,after.z,{lap:2,passed:32,nextGate:0},course);
-  const start=courseLighting(before.x,before.z,{lap:3,passed:33,nextGate:1},course);
-  assert.equal(end.altitude,start.altitude,'Checkpoint state keeps the sky continuous across the seam');
-  assert.ok(Math.abs(end.altitude-(.24-.44*2/3))<1e-12);
-});
-
-test('free play cycles through day, sunset, night and sunrise by time even when stationary',()=>{
-  const course=COURSES.free;
-  for(const [time,altitude] of [[0,1],[60,0],[120,-1],[180,0],[240,1]]){
-    const a=courseLighting(0,0,{passed:0},course,time);
-    const b=courseLighting(300,-200,{passed:0},course,time);
-    assert.ok(Math.abs(a.altitude-altitude)<1e-12);assert.equal(a.altitude,b.altitude);
-    assert.deepEqual(a.sunDirection,b.sunDirection);
-  }
-  const a=courseLighting(0,0,{},course,239.999),b=courseLighting(0,0,{},course,240.001);
-  assert.ok(Math.hypot(...a.sunDirection.map((v,i)=>v-b.sunDirection[i]))<.001);
-});
-
-test('title lighting rotates smoothly between course settings without a sudden sun jump',()=>{
-  let current=courseLighting(0,0,{},COURSES.main);
+test('lighting eases checkpoint changes and course selection without sudden sun jumps',()=>{
+  let current=courseLighting({passed:0},COURSES.main);
   for(const course of [COURSES.rocky,COURSES.sunrise,COURSES.reverse,COURSES.main]){
-    const target=courseLighting(0,0,{},course);
-    const held=easeTitleLighting(current,target,0);
-    assert.ok(Math.abs(held.altitude-current.altitude)<1e-12);
-    for(let i=0;i<360;i++){
-      const next=easeTitleLighting(current,target,1/60);
-      assert.ok(Math.hypot(...next.sunDirection.map((v,j)=>v-current.sunDirection[j]))<.08);
-      assert.ok(Math.abs(Math.hypot(...next.sunDirection)-1)<1e-12);
-      current=next;
+    for(const passed of [0,1,course.gates.length,course.gates.length*3+1]){
+      const target=courseLighting({passed},course),held=easeLighting(current,target,0);
+      assert.ok(Math.abs(held.altitude-current.altitude)<1e-12);
+      for(let i=0;i<360;i++){
+        const next=easeLighting(current,target,1/60);
+        assert.ok(Math.hypot(...next.sunDirection.map((v,j)=>v-current.sunDirection[j]))<.08);
+        assert.ok(Math.abs(Math.hypot(...next.sunDirection)-1)<1e-12);
+        current=next;
+      }
+      assert.ok(Math.hypot(...current.sunDirection.map((v,j)=>v-target.sunDirection[j]))<.002);
+      assert.ok(Math.abs(current.altitude-target.altitude)<.001);
     }
-    assert.ok(Math.hypot(...current.sunDirection.map((v,j)=>v-target.sunDirection[j]))<.002);
-    assert.ok(Math.abs(current.altitude-target.altitude)<.001);
   }
-});
-test('lens flare is concentrated near straight ahead and fades by viewing angle',()=>{
-  for(const aspect of [1.2,16/9,21/9]){
-    const strength=degrees=>flareAlignment({x:Math.tan(degrees*Math.PI/180)/Math.tan(.99/2)/aspect,y:0},aspect);
-    assert.equal(strength(0),1);
-    assert.ok(strength(10)>.4&&strength(10)<.6);
-    assert.ok(strength(20)<.1&&strength(30)<.005);
-  }
-});
-test('distant sky follows camera rotation and pitch, without translation parallax',()=>{
-  const view=(eye,target)=>multiply(perspective(.99,1.5,.25,1300),lookAt(eye,target));
-  const direction=[0,.1,1],forward=view([0,0,0],[0,0,1]);
-  const initial=projectSkyDirection(forward,direction);
-  const moved=projectSkyDirection(view([73,8,-49],[73,8,-48]),direction);
-  assert.deepEqual(moved,initial);
-  const turned=projectSkyDirection(view([0,0,0],[.5,0,1]),direction);
-  assert.ok(Math.abs(turned.x-initial.x)>.5);
-  const pitched=projectSkyDirection(view([0,0,0],[0,.3,1]),direction);
-  assert.ok(pitched.y<initial.y-.4);
-  assert.equal(projectSkyDirection(view([0,0,0],[0,0,-1]),direction),null);
 });
 
-test('sun directions stay normalized across course profiles and the free-play cycle',()=>{
-  for(const course of Object.values(COURSES))for(const lap of [1,2,3])for(const t of [0,.25,.5,.75,.9999]){
-    const p=coursePoint(t,course),l=courseLighting(p.x,p.z,{lap},course,t*240);
-    assert.ok(Math.abs(Math.hypot(...l.sunDirection)-1)<1e-12);
+test('sun directions stay normalized across all course checkpoints',()=>{
+  for(const course of Object.values(COURSES))for(let passed=0;passed<=course.gates.length*3+1;passed++){
+    assert.ok(Math.abs(Math.hypot(...courseLighting({passed},course).sunDirection)-1)<1e-12);
   }
 });
 
@@ -135,7 +74,8 @@ test('spray and foam turn rainbow only at maximum level',()=>{
   const white=p=>p.color.every((v,i)=>v===[.8,.9,.9][i]);
   for(const charge of [0,.5,.999,1])for(const level of [1,2,3,4,5]){
     const particles=emit(level,charge),spray=particles.filter(p=>!p.foam),foam=particles.filter(p=>p.foam);
-    assert.ok(spray.length>0&&foam.length>0);
+    assert.equal(spray.length,4,'two rear droplets per emission');
+    assert.ok(foam.length>0);
     assert.ok(particles.every(p=>!p.corners),'no level emits ribbon quads');
     assert.ok(foam.every(p=>p.foam&&Math.hypot(p.vx,p.vz)>0));
     assert.equal(foam.length,12,'six foam flecks per emission');
@@ -144,26 +84,29 @@ test('spray and foam turn rainbow only at maximum level',()=>{
   }
 });
 
-test('approximate hull spray uses one wave sample and rejects dry or submerged sides',()=>{
-  const r={x:10,y:0,z:20,yaw:0};
-  let samples=0;
-  const water=(x,z,time)=>{
-    samples++;assert.equal(time,3);return 0;
-  };
-  assert.deepEqual(hullSprayContact(r,1,1,3,water),{x:10.7,y:.05,z:21});
-  assert.equal(samples,1);
-  assert.equal(hullSprayContact({...r,y:1},1,0,3,water),null);
-  assert.equal(hullSprayContact({...r,y:-1},1,0,3,water),null);
-  assert.equal(hullSprayContact({...r,roll:1},1,0,3,water),null);
-  assert.equal(hullSprayContact({...r,pitch:1},1,1,3,water),null);
-  const turned=hullSprayContact({...r,yaw:Math.PI/2},-1,1,3,water);
-  assert.ok(Math.abs(turned.x-11)<1e-12&&Math.abs(turned.z-20.7)<1e-12);
-});
-
 test('maximum-level spray and foam use full rainbow colors even at low speed',()=>{
   const palette=RAINBOW_COLORS.map(rgb).map(c=>c.map(v=>v**2.2));
   for(const speed of [4,16,48]){
     const particles=emit(5,1,speed);
     assert.ok(particles.every(p=>palette.some(c=>c.every((v,i)=>v===p.color[i]))));
   }
+});
+
+test('spray and foam keep separate motion and expire after stopping or jumping',()=>{
+  const state={particleClock:0,particles:[],rainbowColors:RAINBOW_COLORS.map(rgb),random:()=>.5};
+  const rider={x:0,y:1,z:0,yaw:0,speed:48,speedLevel:1,airborne:false};
+  const race={worldTime:0,phase:'racing',racers:[rider]};
+  const advance=dt=>{race.worldTime+=dt;Renderer.prototype.updateEffects.call(state,race,dt);};
+  advance(.07);
+  const spray=state.particles.filter(p=>!p.foam),foam=state.particles.filter(p=>p.foam);
+  assert.equal(spray.length,2);assert.equal(foam.length,6);
+  assert.ok(spray.every(p=>p.y>rider.y&&p.vy>0&&p.vz<0),'Droplets rise and trail behind');
+  assert.ok(foam.every(p=>p.y===0&&p.vy===0&&p.vz===0),'Foam stays on its surface path');
+  assert.ok(foam.some(p=>p.vx<0)&&foam.some(p=>p.vx>0),'Foam spreads to both sides');
+  const old=state.particles.slice();rider.speed=3;advance(.1);
+  assert.deepEqual(state.particles,old,'Stopping emits no new particles');
+  rider.speed=48;rider.airborne=true;advance(.1);
+  assert.deepEqual(state.particles,old,'Airborne craft emit no new particles');
+  for(let i=0;i<120;i++)advance(1/60);
+  assert.equal(state.particles.length,0,'Existing spray and foam finish their lifetimes');
 });

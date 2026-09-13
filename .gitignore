@@ -1,3 +1,4 @@
 dist/
+!dist/sunwake-rush.zip
 .DS_Store
 node_modules/

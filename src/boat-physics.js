@@ -1,4 +1,4 @@
-import { clamp, modelMatrix, DEVELOPMENT } from './math.js';
+import { clamp, blend, modelMatrix, DEVELOPMENT } from './math.js';
 import { waveHeight, sampleWater } from './course.js';
 
 // Inspired by fnport's primary hull contacts + secondary rider solver, not
@@ -9,8 +9,13 @@ export const OPPONENT_PACE = 1.15;
 export const RIDER_LEAN = .24;
 // Every rider earns the same 8% per clean checkpoint, up to level five.
 export function speedMultiplier(racer) {
-  const earned=1 + .08 * (clamp(DEVELOPMENT?(racer.speedLevel||1):racer.speedLevel, 1, MAX_SPEED_LEVEL) - 1);
+  const earned=1 + .08 * ((DEVELOPMENT?clamp(racer.speedLevel||1,1,MAX_SPEED_LEVEL):racer.speedLevel) - 1);
   return earned*(racer.id===0?1:OPPONENT_PACE);
+}
+export function limitSpeed(r, limit) {
+  const speed = Math.hypot(r.vx, r.vz);
+  if (speed > limit) { r.vx *= limit / speed; r.vz *= limit / speed; }
+  r.speed = Math.hypot(r.vx, r.vz);
 }
 // Stronger downward acceleration shortens wave launches without an airtime cap.
 const GRAVITY = 22;
@@ -22,7 +27,7 @@ export function newBoatState() {
     waterImpact: 0, splashCooldown: 0,
     ...(DEVELOPMENT ? {contactFraction:1,waterForce: 0, landingImpact: 0, contactPoints: []} : {}),
     rider: { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, pitch: 0, pitchRate: 0, ...(DEVELOPMENT?{roll:0,rollRate:0}:{}),
-      handlePitch:0,handlePitchRate:0 } };
+      handlePitch:0 } };
 }
 
 export function resetBoat(racer, time) {
@@ -58,7 +63,7 @@ export function springRider(r, ax, ay, az, dt) {
     if (constrained !== rider[axis]) { rider[axis] = constrained; rider[velocity] = 0; }
   });
   // Turns and side impacts shift the body laterally without tipping it.
-  // Keep the roll fields for interpolation/reset compatibility.
+  // Keep the roll fields for reset compatibility.
   if(DEVELOPMENT)rider.roll = rider.rollRate = 0;
   const target = clamp(forwardAccel * .0025, -.12, .12);
   rider.pitchRate += ((target - rider.pitch) * 55 - rider.pitchRate * 12 + r.pitchRate * 1.8) * dt;
@@ -66,17 +71,13 @@ export function springRider(r, ax, ay, az, dt) {
   if (Math.abs(rider.pitch) > .24) {
     rider.pitch = clamp(rider.pitch, -.24, .24); rider.pitchRate = 0;
   }
-  // A hinged steering pole follows the rider's suspension with damped travel.
-  const handleTarget=clamp(rider.y*(rider.y>0?1.7:.3),-.12,.24);
-  rider.handlePitchRate+=((handleTarget-rider.handlePitch)*90-rider.handlePitchRate*17)*dt;
-  rider.handlePitch+=rider.handlePitchRate*dt;
-  if(rider.handlePitch<-.12||rider.handlePitch>.24){
-    rider.handlePitch=clamp(rider.handlePitch,-.12,.24);rider.handlePitchRate=0;
-  }
+  // The steering pole follows the already-smoothed suspension directly.
+  rider.handlePitch=clamp(rider.y*(rider.y>0?1.7:.3),-.12,.24);
 }
 
 export function stepBoat(r, input, dt, time, water = sampleWater, moored = false) {
-  const steps = Math.max(1, Math.ceil(dt / (1 / 240))), h = dt / steps;
+  // Production advances only at 60 Hz; fixtures can supply other time steps.
+  const steps = DEVELOPMENT ? Math.max(1, Math.ceil(dt / (1 / 240))) : 4, h = dt / steps;
   if(DEVELOPMENT)r.landingImpact = Math.max(0, r.landingImpact - dt * 12);
   r.waterImpact = 0;
   const power = speedMultiplier(r);
@@ -125,9 +126,10 @@ export function stepBoat(r, input, dt, time, water = sampleWater, moored = false
     // Bleed off fast upward rebound while the hull is still in the water.
     // Gentle bobbing and free-flight gravity remain unaffected.
     fy -= contact * Math.max(0, r.vy - 3) * 12;
-    const throttle = clamp(input.throttle || 0, 0, 1);
-    const steer = clamp(input.steer || 0, -1, 1);
-    r.steer += (steer - r.steer) * (1 - Math.exp(-12 * h));
+    // Keyboard and AI controls are already bounded; coasting uses empty input.
+    const throttle = input.throttle || 0;
+    const steer = input.steer || 0;
+    r.steer += (steer - r.steer) * blend(h, 12);
     // Submerged hull drag acts in heading/lateral directions. In flight,
     // steering cannot redirect horizontal momentum or produce jet thrust.
     const forward = r.vx * s + r.vz * c, lateral = r.vx * c - r.vz * s;
@@ -161,10 +163,8 @@ export function stepBoat(r, input, dt, time, water = sampleWater, moored = false
     r.vy += fy * h; r.y += r.vy * h;
     if (!moored) {
       r.vx += fx * h; r.vz += fz * h;
-      const speed = Math.hypot(r.vx, r.vz);
-      const limit = Math.max(50 * power, r.speed - h * 14);
-      if (speed > limit) { r.vx *= limit / speed; r.vz *= limit / speed; }
-      r.x += r.vx * h; r.z += r.vz * h; r.speed = Math.hypot(r.vx, r.vz);
+      limitSpeed(r, Math.max(50 * power, r.speed - h * 14));
+      r.x += r.vx * h; r.z += r.vz * h;
     }
     springRider(r, moored ? 0 : fx, fy, moored ? 0 : fz, h);
   }
@@ -191,16 +191,11 @@ export function handlebarPose(r){
 
 export function riderPose(r) {
   const p = r.rider;
-  const hull = modelMatrix(0, 0, 0, r.yaw, r.pitch, r.roll);
   const extension=Math.max(0,p.y);
-  const upright = modelMatrix(0, 0, 0, r.yaw, p.pitch + RIDER_LEAN + extension*.35, 0);
-  const torsoMatrix = modelMatrix();
-  // inverse(hull rotation) * balanced world orientation. Unlike subtracting
-  // Euler angles this stays upright under simultaneous pitch, roll, and yaw.
-  for (let col = 0; col < 3; col++) for (let row = 0; row < 3; row++) {
-    torsoMatrix[col * 4 + row] = hull[row * 4] * upright[col * 4]
-      + hull[row * 4 + 1] * upright[col * 4 + 1] + hull[row * 4 + 2] * upright[col * 4 + 2];
-  }
+  // Heading cancels. Transpose the inverse relative rotation to keep the
+  // torso balanced without constructing and multiplying two world matrices.
+  const inverse=modelMatrix(0,0,0,0,r.pitch-p.pitch-RIDER_LEAN-extension*.35,r.roll);
+  const torsoMatrix=inverse.map((v,i)=>inverse[i%4*4+(i>>2)]);
   const right = Array.from(torsoMatrix.slice(0, 3)), up = Array.from(torsoMatrix.slice(4, 7));
   const forward = Array.from(torsoMatrix.slice(8, 11));
   // Follow an upward/forward standing arc so the fixed grips do not pin the

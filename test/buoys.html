@@ -1,0 +1,28 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Shared buoy palette</title>
+<style>body{margin:0;background:#253d46;color:white;font:16px sans-serif}header{padding:16px}button{padding:8px}canvas{width:100%;height:80vh}p{margin:8px}</style>
+<header><button id="night">Day / night</button><p>Normal cyan · normal red · highlighted cyan · highlighted red · start pair (black arrows)</p><span id="status"></span></header><canvas id="game"></canvas>
+<script type="module">
+import {Renderer} from '../src/renderer.js';
+import {COURSES} from '../src/course.js';
+import {createRace} from '../src/simulation.js';
+import {modelMatrix,lookAt,perspective,multiply} from '../src/math.js';
+const canvas=document.querySelector('canvas'),renderer=new Renderer(canvas),gl=renderer.gl;
+let night=0;document.querySelector('button').onclick=()=>{night=1-night;draw();};
+const mesh=renderer.buoyMesh;
+for(const id of Object.keys(COURSES))renderer.syncCourse(createRace(id));
+if(renderer.buoyMesh!==mesh)throw Error('Buoy buffer changed with course');
+function draw(){
+ canvas.width=canvas.clientWidth;canvas.height=canvas.clientHeight;
+ gl.viewport(0,0,canvas.width,canvas.height);gl.clearColor(.15,.24,.28,1);gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);gl.useProgram(renderer.program);
+ gl.uniformMatrix4fv(renderer.loc.uView,false,multiply(perspective(.7,canvas.width/canvas.height,.1,200),lookAt([0,12,60],[0,4,0])));
+ gl.uniform3fv(renderer.loc.uEye,[0,12,60]);gl.uniform3fv(renderer.loc.uLightDirection,[.3,1,.5]);gl.uniform1f(renderer.loc.uNight,night);
+ for(let i=0;i<6;i++){
+  const side=i%2?1:-1,model=modelMatrix((i-2.5)*8,0,0);
+  for(let j=0;j<3;j++)model[j]*=side;
+  gl.uniform4f(renderer.loc.uBuoy,...(i>3||side>0?[1,118/255,105/255]:[102/255,230/255,237/255]),i>3?1:0);
+  renderer.drawMesh(mesh,model,i===2||i===3?-.25:-1);
+ }
+ document.querySelector('#status').textContent=`${night?'Night':'Day'} · shared buffer across all four courses · WebGL ${gl.getError()}`;
+}
+draw();window.onresize=draw;
+</script></html>

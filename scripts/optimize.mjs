@@ -5,11 +5,11 @@ import CleanCSS from 'clean-css';
 import { minify as minifyHTML } from 'html-minifier-terser';
 import { runInNewContext } from 'node:vm';
 import * as course from '../src/course.js';
-import {rainbowShader,skyGradientShader} from '../src/renderer.js';
+import {skyGradientShader} from '../src/renderer.js';
 import {stripCourseDefaults,inlineWebGLConstants,encodeEnums} from './transforms.mjs';
 import {shaderNames as localShaderNames,renameShaderTokens,compactShaderNumbers} from './glsl.mjs';
 
-export const modules=['math','course','boat-physics','interactions','racing-lines','simulation','attract','mesh','atmosphere','renderer','audio','presentation','main'];
+export const modules=['math','course-codes','course','boat-physics','interactions','racing-lines','simulation','attract','mesh','renderer','audio','main'];
 export async function readScripts(names=modules){
   return (await Promise.all(names.map(name=>readFile(`src/${name}.js`,'utf8')))).map(source=>source
     .replace(/^export const gameState = .*;$/gm,'')
@@ -47,11 +47,11 @@ export function stripMetadata(source){
   for(const [start,end,text] of edits.sort((a,b)=>b[0]-a[0]))source=source.slice(0,start)+text+source.slice(end);
   return source;
 }
-const shaderNames=['vertexSource','fragmentSource','skyVertex','skyFragment','flareFragment'];
+const shaderNames=['vertexSource','fragmentSource','skyVertex','skyFragment'];
 const compactGLSL=text=>text.replace(/\/\/[^\n]*(?:\n|$)/g,' ').replace(/\/\*[\s\S]*?\*\//g,' ')
   .replace(/\s+/g,' ').replace(/\s*([{}()[\],;:*\/=<>?])\s*/g,'$1');
 export function precompileShaders(source){
-  source=source.replaceAll('${rainbowShader}',rainbowShader).replaceAll('${skyGradientShader}',skyGradientShader);
+  source=source.replaceAll('${skyGradientShader}',skyGradientShader);
   const edits=[];
   walk(parse(source,{ecmaVersion:'latest'}),node=>{
     if(node.type!=='VariableDeclarator'||!shaderNames.includes(node.id.name))return;
@@ -66,7 +66,7 @@ export function precompileShaders(source){
   return source;
 }
 export function shortenShaderLocals(source,frequency=false,{scoped=false,numbers=false}={}){
-  source=source.replaceAll('${rainbowShader}',rainbowShader).replaceAll('${skyGradientShader}',skyGradientShader);
+  source=source.replaceAll('${skyGradientShader}',skyGradientShader);
   const edits=[];
   walk(parse(source,{ecmaVersion:'latest'}),node=>{
     if(node.type!=='VariableDeclarator'||!shaderNames.includes(node.id.name))return;
@@ -82,7 +82,7 @@ export function shortenShaderLocals(source,frequency=false,{scoped=false,numbers
   return source;
 }
 export function compactShaders(source){
-  source=source.replaceAll('${rainbowShader}',rainbowShader).replaceAll('${skyGradientShader}',skyGradientShader);
+  source=source.replaceAll('${skyGradientShader}',skyGradientShader);
   const edits=[],ast=parse(source,{ecmaVersion:'latest'});
   walk(ast,node=>{
     if(node.type!=='VariableDeclarator'||!shaderNames.includes(node.id.name))return;
@@ -100,12 +100,13 @@ export function compactShaders(source){
 }
 // Explicit application fields only: DOM, WebGL, Web Audio, and dataset keys
 // retain their public names. Dynamic physics keys are annotated together below.
-const dynamicProperties=`yaw pitch roll speed handlePitch pitchRate rollRate handlePitchRate anchorX anchorZ leanX leanZ tiltVX tiltVZ`.split(' ');
-const privateProperties=[...new Set((`fullscreen taperedBox activeGates cameraReady cameraYaw cameraPace crafts drawMesh drawDynamic drawLensFlare effectBuffer engineGain engineVoice envelope fishBuffer flareProgram gateMeshes gullRacer hideCourseMarkers lighthouse lightingReady makeProgram makeWater nextGull nightBlend particleClock rainbowColors riderBuffer rivalEngines seagullBuffer shadowStyle shadowUniforms skyBuffer skyProgram splashNoise sunScreen sunTexture surfFilter surfGain surfPan syncCourse updateEffects wakeUniforms waterGain speedLevel nextGate finishTime freePlay impactCooldown splashCooldown waterImpact worldTime course aiSkill contactFraction handlebar racers wakes rider gates buoys passed misses lap attract wakeClock countdown tangent samples bounds progressCenter aiSkill
+const dynamicProperties=`yaw pitch roll speed handlePitch pitchRate rollRate handlePitchRate leanX leanZ`.split(' ');
+const privateProperties=[...new Set((`fullscreen taperedBox buoyMesh cameraReady cameraYaw crafts drawMesh drawDynamic drawLensFlare effectBuffer engineGain envelope fishBuffer flareProgram gullRacer lighthouse lightingReady makeProgram makeWater nextGull nightBlend particleClock rainbowColors riderBuffer seagullBuffer shadowUniforms skyBuffer skyProgram splashNoise sunScreen sunTexture surfFilter surfGain surfPan syncCourse updateEffects wakeUniforms waterGain speedLevel nextGate finishTime impactCooldown splashCooldown waterImpact worldTime course aiSkill contactFraction handlebar racers wakes rider gates buoys passed misses lap attract wakeClock countdown tangent samples bounds progressCenter aiSkill
 steep reef lampHeight sunDirection twilight altitude lighting lightingCourse
 particles loc attr crafts island rainbow beacon lamp seabed seagrass
 triangle quad box cone sphere beam upload tone splash seagull unlock
 hipOffset shoulderOffset hip shoulder knee elbow foot hand hips chest torsoMatrix grips ends limbs pivot
+grid data context master engine program water eye view random count night foam life center points events gl
 maxX minX maxZ minZ airborne yawRate steer throttle brake amplitude contactFraction
 `).trim().split(/\s+/).concat(dynamicProperties))];
 export function markPropertyKeys(source){
@@ -148,11 +149,12 @@ export async function packageHTML(html,css,script,{metadata=true}={}){
   if(metadata)html=html
     .replace(/\s*<meta\b[^>]*\bname="(?:description|theme-color)"[^>]*>/g,'')
     .replace(/\s*<link\b[^>]*\brel="icon"[^>]*>/g,'')
-    .replace(/<title>[^<]*<\/title>/,'<title>Sunwake Rush</title>');
+    .replace(/<title>[^<]*<\/title>/,'');
   const style=new CleanCSS({level:2}).minify(css);
   if(style.errors.length)throw Error(style.errors.join('\n'));
   html=html.replace('<link rel="stylesheet" href="style.css">',()=>`<style>${style.styles}</style>`)
     .replace('<script type="module" src="src/main.js"></script>',()=>`<script>${script}</script>`);
-  return minifyHTML(html,{collapseWhitespace:true,removeComments:true,removeRedundantAttributes:true,
-    removeEmptyAttributes:true,collapseBooleanAttributes:true,keepClosingSlash:false});
+  // Keep the UTF-8 BOM outside minification, which treats it as whitespace.
+  return '\ufeff'+await minifyHTML(html.replace(/^\ufeff/,''),{collapseWhitespace:true,removeComments:true,removeRedundantAttributes:true,
+    removeEmptyAttributes:true,collapseBooleanAttributes:true,keepClosingSlash:false,removeOptionalTags:true,removeAttributeQuotes:true});
 }

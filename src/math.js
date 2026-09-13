@@ -3,6 +3,7 @@ export const DEVELOPMENT = true;
 export const TAU = Math.PI * 2;
 export const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 export const lerp = (a, b, t) => a + (b - a) * t;
+export const blend = (dt, rate) => 1 - Math.exp(-dt * rate);
 export const angleDelta = (a, b) => Math.atan2(Math.sin(a - b), Math.cos(a - b));
 export const distance = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 export function randomSeed(seed = 13) {

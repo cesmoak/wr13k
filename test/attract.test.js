@@ -6,53 +6,55 @@ import {createRace,startRace} from '../src/simulation.js';
 import {TITLE_CAMERA} from '../src/renderer.js';
 import {lookAt,perspective,multiply} from '../src/math.js';
 
-test('every title mode previews four moving riders on the selected route; free uses main',()=>{
+test('selected-course title racing resets the same race for a clean start',()=>{
   for(const course of Object.values(COURSES)){
-    const demo=createTitleRace(course),old=demo.racers.map(r=>({x:r.x,z:r.z}));
-    assert.equal(demo.racers.length,4);assert.equal(demo.course.id,course.freePlay?'main':course.id);
+    const demo=createTitleRace(course.id),old=demo.racers.map(r=>({x:r.x,z:r.z}));
     for(let i=0;i<120;i++)stepTitleRace(demo,1/60);
+    assert.equal(demo.course,course);assert.equal(demo.phase,'title');
     assert.ok(demo.racers.every((r,i)=>Math.hypot(r.x-old[i].x,r.z-old[i].z)>10));
-    assert.equal(demo.phase,'racing');assert.equal(demo.events.length,0);
-    const game=createRace(course.id);startRace(game);
-    assert.equal(game.racers.length,4);
-    assert.ok(game.racers.every(r=>r.passed===0&&r.speedLevel===1));assert.equal(game.time,0);
+    assert.equal(demo.events.length,0);
+    startRace(demo);
+    assert.equal(demo.course,course);assert.equal(demo.phase,'countdown');
+    assert.ok(!demo.attract,'Normal races must still finish and enforce misses');
+    assert.equal(demo.time,0);assert.equal(demo.worldTime,0);
+    assert.ok(demo.racers.every(r=>r.passed===0&&r.speedLevel===1&&r.misses===0));
   }
 });
 
 test('finished title riders continue from their current position without a grid reset',()=>{
-  const demo=createTitleRace(COURSES.main),r=demo.racers[0];
+  const demo=createTitleRace(),r=demo.racers[0];
   r.finishTime=80;r.passed=31;r.nextGate=1;r.lap=3;r.misses=5;
   const x=r.x,z=r.z;stepTitleRace(demo,1/60);
   assert.equal(r.finishTime,null);assert.equal(r.passed,1);assert.equal(r.nextGate,1);
-  assert.equal(r.lap,1);assert.equal(r.misses,0);assert.equal(demo.phase,'racing');
+  assert.equal(r.lap,1);assert.equal(r.misses,0);assert.equal(demo.phase,'title');
   assert.ok(Math.hypot(r.x-x,r.z-z)<2);
 });
 
-test('every title pack uses the normal course-zero grid; free hides markers',()=>{
-  for(const id of Object.keys(COURSES)){
-    const demo=createTitleRace(COURSES[id]),grid=createRace(id==='free'?'main':id);
-    for(const r of demo.racers){
-      const start=grid.racers[r.id];
-      assert.deepEqual([r.x,r.z,r.yaw],[start.x,start.z,start.yaw]);
-      assert.equal(r.nextGate,0);assert.equal(r.passed,0);assert.equal(r.lap,1);
-      assert.equal(r.speed,0,'No custom velocity or warm-up simulation');
-    }
-    assert.equal(demo.hideCourseMarkers,id==='free');
-    if(id==='free')assert.equal(demo.buoys.length,0);
+test('title starts on the normal main-course grid with visible buoys',()=>{
+  const demo=createTitleRace(),grid=createRace('main');
+  assert.equal(demo.worldTime,0);assert.deepEqual(demo.buoys,grid.buoys);
+  assert.equal(demo.buoys.length,11);
+  for(const r of demo.racers){
+    assert.deepEqual(r,grid.racers[r.id]);
+    assert.equal(r.nextGate,0);assert.equal(r.passed,0);assert.equal(r.lap,1);
+    assert.equal(r.speed,0,'No custom velocity or warm-up simulation');
   }
 });
 
-test('changing title courses preserves lighthouse and water time',()=>{
-  let demo=createTitleRace(COURSES.main);
-  for(let i=0;i<600;i++)stepTitleRace(demo,1/60);
-  for(const course of Object.values(COURSES)){
-    const time=demo.worldTime;
-    demo=createTitleRace(course,time);
-    assert.equal(demo.worldTime,time);
-    assert.ok(demo.racers.every(r=>r.speed===0));
+test('title riders keep moving through repeated three-lap finishes',()=>{
+  const demo=createTitleRace(),crossings=[0,0,0,0];
+  for(let i=0;i<60*160;i++){
+    const targets=demo.racers.map(r=>r.nextGate);
     stepTitleRace(demo,1/60);
-    assert.ok(demo.racers.every(r=>r.speed>0),'The shared grid accelerates immediately');
+    for(const r of demo.racers){
+      if(r.nextGate!==targets[r.id])crossings[r.id]++;
+      assert.ok(Number.isFinite(r.x)&&Number.isFinite(r.z));
+      assert.equal(r.finishTime,null);
+    }
+    assert.equal(demo.phase,'title');assert.equal(demo.events.length,0);
   }
+  assert.ok(crossings.every(n=>n>demo.course.gates.length*6),`Repeated circuits: ${crossings}`);
+  assert.ok(demo.racers.every(r=>r.speed>10));
 });
 
 test('fixed title camera keeps the lighthouse on the right at desktop aspect ratios',()=>{

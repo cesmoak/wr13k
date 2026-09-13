@@ -15,11 +15,15 @@ run.onclick=async()=>{
   const key=(code,type='keydown')=>w.dispatchEvent(new w.KeyboardEvent(type,{code,bubbles:true}));
   try{
     const buttons=d.querySelector('.'+selectors['course-menu']).children;
-    for(const [index,mode] of ['free','main','reverse','rocky','sunrise'].entries()){
+    check(d.compatMode==='CSS1Compat'&&d.characterSet==='UTF-8','standards mode and UTF-8 encoding');
+    check(d.querySelectorAll('#'+selectors.hud+' > p').length===5,'all five paragraph HUD tiles retain their structure');
+    check(!d.title&&!d.documentElement.hasAttribute('lang')&&!d.querySelector('[role]'),'removed title, language and roles');
+    check(buttons.length===4,'exactly four race courses');
+    for(const [index,mode] of ['main','reverse','rocky','sunrise'].entries()){
       check(!$('title-screen').hidden,`${mode}: title menu`);
       buttons[index].click();await wait(120);
       check(buttons[index].classList.contains(selectors.selected??'selected'),`${mode}: selection`);
-      $('start').click();await wait(mode==='free'?200:3900);
+      $('start').click();await wait(3900);
       check(!$('hud').hidden&&$('title-screen').hidden,`${mode}: race starts`);
       key('KeyW');await wait(650);key('KeyW','keyup');
       check(Number($('speed').textContent)>0,`${mode}: throttle moves the craft`);
@@ -40,7 +44,7 @@ run.onclick=async()=>{
     }
     check(errors.length===0,`no runtime errors: ${errors.join(', ')}`);
     check(w.performance.getEntriesByType('resource').length===0,'packed document makes zero subresource requests');
-    report.textContent=`PASS — ${checks} checks across all five packed modes. No runtime/WebGL errors or subresource requests.`;
+    report.textContent=`PASS — ${checks} checks across all four packed modes. No runtime/WebGL errors or subresource requests.`;
   }catch(error){report.textContent=`FAIL after ${checks} checks: ${error.message}`;}
   finally{run.disabled=false;}
 };

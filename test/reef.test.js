@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {COURSES,landforms,reefRocks,outerReefRocks,islands,shoreRadius,coursePoint} from '../src/course.js';
+import {COURSES,landforms,reefRocks,outerReefRocks,islands,shoreRadius} from '../src/course.js';
 import {createRace,updateRacer} from '../src/simulation.js';
 import {courseLighting} from '../src/renderer.js';
 
@@ -30,27 +30,21 @@ test('outer reef forces alternating turns beyond the smaller island',()=>{
 });
 
 test('reef rocks repel a hull instead of allowing it through the scenery',()=>{
-  const race=createRace('free'),r=race.racers[0],rock=reefRocks[2];
+  const race=createRace('main'),r=race.racers[0],rock=reefRocks[2];
   Object.assign(r,{x:rock.x+rock.rx*.5,z:rock.z,speedLevel:5});
-  updateRacer(r,{},1/60,race);
+  updateRacer(r,{},1/60,race,true);
   assert.ok(Math.abs(r.x-rock.x-rock.rx*(shoreRadius(0)*.915+.028))<.1,'Reef rocks repel the hull to the shared waterline');
   assert.equal(r.speedLevel,1);assert.equal(r.misses,0);
 });
 
-test('sunrise rises continuously from predawn through the horizon to daylight over three laps',()=>{
-  const course=COURSES.sunrise;let last=-1;
-  for(const lap of [1,2,3])for(let i=0;i<100;i++){
-    const p=coursePoint(i/100,course),l=courseLighting(p.x,p.z,{lap},course);
-    assert.ok(l.altitude>=last-.0001);last=l.altitude;
+test('sunrise reaches daylight through the three-lap checkpoint sequence',()=>{
+  const course=COURSES.sunrise,total=course.gates.length*3;
+  let last=-1;
+  for(let passed=0;passed<=total+1;passed++){
+    const light=courseLighting({passed},course);
+    assert.ok(light.altitude>=last);last=light.altitude;
   }
-  const p=coursePoint(0,course);
-  const start=courseLighting(p.x,p.z,{lap:1,passed:0},course);
-  const finish=courseLighting(p.x,p.z,{lap:3,finishTime:120},course);
+  const start=courseLighting({passed:0},course),finish=courseLighting({passed:total+1},course);
   assert.ok(start.sunDirection[1]<0&&finish.sunDirection[1]>0);
   assert.ok(start.night>.9);assert.equal(finish.night,0);
-  for(const lap of [1,2]){
-    const a=coursePoint(.99999,course),b=coursePoint(.00001,course);
-    assert.ok(Math.abs(courseLighting(a.x,a.z,{lap},course).altitude-
-      courseLighting(b.x,b.z,{lap:lap+1},course).altitude)<.001);
-  }
 });

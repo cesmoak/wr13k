@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en"><meta charset="utf-8"><title>Sunwake Rush rider balance</title>
 <style>body{margin:0;background:#183b3a;font:14px Arial;color:#f4f6df}canvas{width:100vw;height:100vh;display:block}aside{position:fixed;top:20px;left:20px;background:#183b3aee;padding:16px;border-radius:5px}button{padding:10px;background:#c7ff75;border:0;cursor:pointer;margin-right:8px}p{margin:12px 0 0}</style>
-<canvas id="game"></canvas><aside><button id="bank">Hold bank</button><button id="rock">Rock hull</button><button id="land">Landing impulse</button><p id="status"></p><p>Real rider physics; hull held in view to show relative motion. White pole marks world vertical.</p></aside>
+<canvas id="game"></canvas><aside><button id="bank">Hold bank</button><button id="rock">Rock hull</button><button id="land">Landing impulse</button><p id="status"></p><p>Fixed .55-unit arm/leg segments; hands and feet stay anchored while the supported pelvis moves. White pole marks world vertical.</p></aside>
 <script type="module">
 import { Renderer } from '../src/renderer.js';
 import { createRacer } from '../src/simulation.js';
