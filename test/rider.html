@@ -29,7 +29,7 @@ function frame(now){
  if(mode==='jump'){
   jumpTime+=dt;
   if(jumpTime>3){resetBoat(r,time);r.y=2;r.vy=5;jumpTime=0;}
-  if(dt>0)stepBoat(r,{},dt,time,[],()=>({height:0,nx:0,ny:1,nz:0,velocity:0}));
+  if(dt>0)stepBoat(r,{},dt,time,()=>({height:0,nx:0,ny:1,nz:0,velocity:0}));
  }else{
   r.airborne=false;
   const steps=Math.max(1,Math.ceil(dt*240));
@@ -42,10 +42,10 @@ function frame(now){
  gl.uniform3fv(renderer.loc.uEye,eye);gl.uniform1f(renderer.loc.uTime,time);
  renderer.drawMesh(reference);
  const hull=modelMatrix(0,0,0,r.yaw,r.pitch,r.roll);renderer.drawMesh(renderer.crafts[0],hull);
- const mesh=createRiderMesh(r);gl.bindBuffer(gl.ARRAY_BUFFER,renderer.riderBuffer);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(mesh.data),gl.DYNAMIC_DRAW);
- renderer.drawMesh({buffer:renderer.riderBuffer,count:mesh.data.length/9},hull);
- const world=multiply(hull,riderPose(r).torsoMatrix),angle=Math.acos(Math.min(1,world[5]))*180/Math.PI;
- document.getElementById('status').textContent=`${mode}${mode==='turn'?' · '+turnSpeed+' speed':''}${r.airborne?' · AIRBORNE':''} · hull bank ${(roll*180/Math.PI).toFixed(0)}° · torso lean ${angle.toFixed(1)}° · suspension ${r.rider.y.toFixed(2)} · pole ${(r.rider.handlePitch*180/Math.PI).toFixed(0)}° · WebGL ${gl.getError()}`;
+ const mesh=createRiderMesh(r);gl.bindBuffer(gl.ARRAY_BUFFER,renderer.effectBuffer);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(mesh.data),gl.DYNAMIC_DRAW);
+ renderer.drawMesh({buffer:renderer.effectBuffer,count:mesh.data.length/9},hull);
+ const pose=riderPose(r),world=multiply(hull,pose.torsoMatrix),angle=Math.acos(Math.min(1,world[5]))*180/Math.PI,sideRoll=Math.asin(Math.max(-1,Math.min(1,world[1])))*180/Math.PI;
+ document.getElementById('status').textContent=`${mode}${mode==='turn'?' · '+turnSpeed+' speed':''}${r.airborne?' · AIRBORNE':''} · hull bank ${(roll*180/Math.PI).toFixed(0)}° · torso roll ${sideRoll.toFixed(1)}° · forward lean ${angle.toFixed(1)}° · lateral shift ${r.rider.x.toFixed(2)} · suspension ${r.rider.y.toFixed(2)} · pole ${(r.rider.handlePitch*180/Math.PI).toFixed(0)}° · WebGL ${gl.getError()}`;
  requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);

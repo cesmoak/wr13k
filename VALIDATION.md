@@ -1,4 +1,185 @@
+## Water depth flicker and fast builds (September 13)
+
+- Reproduced irregular surface holes in a frozen-frame comparison. Applying a `(1,1)` polygon offset only to the water depth prepass removed them; the blended color pass retains its unbiased depth. The offset is disabled before other effects render.
+- Added `test/water-depth.html` to compare biased/unbiased passes at a fixed camera and time.
+- Added `npm run build:fast`: the scoped-numbers variant with 15 Zopfli iterations. Measured build time: 1.18 seconds on this machine; current ZIP 22,587 bytes. Full `npm run build` still compares all 15 variants using 15 and 1,000 iterations.
+- All 108 automated tests pass; ZIP integrity passes. Visually checked the corrected surface in the browser.
+
+## Visual wakes and shared atmosphere (September 13)
+
+- Removed boat-generated wave displacement from CPU buoyancy and GPU water height, plus wake queues, timers, and uniforms. Existing particle foam, spray, collision splashes, and sounds remain.
+- Shared one sky-color function between sky rendering, water reflections, and distance fog. Stars retain their night/twilight attenuation.
+- Adjusted the existing wet-hull upward rebound damping after removing wake forces; unchanged jump-height, ballistic flight, rider, and full-course tests pass.
+- Prototyped a generated shoreline-distance texture. The matching compression candidate grew from 22,553 to 22,627 bytes, so the texture was reverted. Scenery counts and analytic shoreline calculations remain intact.
+- Final ZIP: **22,553 bytes**, down **443 bytes** from 22,996. Offline HTML: 55,184 bytes. ZIP integrity check passes.
+- `npm test`: **108 passing tests**, including full AI races across all four race courses. Browser course-mode checks passed, with no WebGL errors; day/night water previews were visually inspected. The final packed build passed 52 checks across all five modes, with no runtime/WebGL errors or subresource requests.
+
 # First-pass validation
+
+## Larger architecture prototypes
+
+- Prototyped four approaches: model instruction rows, a shared audio voice graph, compiled racing lines, and one reusable menu panel. Kept the compiled lines and menu redesign. In the combined prototype, reverting model instructions saved 69 bytes and reverting the audio graph saved 18 bytes; those two experiments were reverted. Their geometry was verified unchanged before rejection.
+- Builds regenerate src/racing-lines.js from the development planner. Compact digit strings encode each rider's original buoy-corridor offsets. Production reconstructs only the next three points and retains live steering, corner-speed control, and obstacle avoidance. Exact-point tests cover every course and rider; the original planner is omitted from production.
+- Title, pause, loss, and finish now share one panel and shared Start/Resume and Courses controls. The HUD retains its information; responsive CSS is simpler and the title camera is unchanged.
+- All **104 automated tests**, **52 packaged-game checks**, **18 speed-level/shared-panel checks**, and **64 production CSS comparisons** pass. All five rendered scenes are pixel-identical to the baseline, including spray/foam. Audio note timing matches; waveform differences match native repeat-render variation. No packed runtime/WebGL errors or subresource requests; ZIP integrity passes.
+- ZIP: **23,528 → 23,052 bytes**, saving **476 bytes**. Built HTML: **56,424 bytes**; CSS: **3,247 bytes**, down from 4,898. The UI-only prototype measured 23,111 bytes; compiled lines saved a further 59 bytes in that configuration.
+
+## Shared rendering buffer and smaller runtime state
+
+- Tried all ten candidates. Kept one shared dynamic geometry buffer, development-only contactFraction storage, redundant shadow-clear/flare-guard removal, production-only removal of initialized-field fallbacks, an object for key state, uncached speed-level updates, and shared minimap path construction. Development fixtures follow the updated key/buffer APIs.
+- Tested Math aliases for all common functions, sin/cos, and hypot: each increased compressed size. The general shader-number formatter added six bytes; the shorter trailing-zero formatter tied the existing code, so both formatter experiments were left out.
+- ZIP: **23,573 → 23,528 bytes**, saving **45 bytes**. Built HTML: **58,250 bytes**. All 103 automated tests pass. GPU comparisons across all five courses are pixel-identical; sound cue scheduling matches, and waveform differences are comparable to repeat rendering of the original. All five minimaps issue identical drawing commands. Eleven real keyboard/pause/focus checks, 15 speed-level checks, and all 52 packaged-mode checks pass. No runtime/WebGL errors or subresource requests; ZIP integrity passes.
+
+## Equal-length limb solver and torso rotation size comparison
+
+- Final full suite: **102 passing tests**, including production/source equivalence.
+
+- Specialized `solveJoint(a, b, bend)` for two .55-unit segments. Forearms grow from .53 to .55; all other limb lengths and pelvis reach limits remain unchanged. The solver retains bend projection, near-parallel fallback, and .001–1.099 distance limits, with a fallback axis for coincident endpoints.
+- Compared four isolated builds with the same source snapshot and build configuration: baseline **23,593 bytes**; direct torso rotation **23,602**; equal-length joints **23,573**; both **23,579**. Kept joints only: **20 ZIP bytes** and **149 source bytes** saved. The direct matrix matched the old rotation within the planned 1e-6 tolerance, but was discarded because it increased compressed size.
+- Updated fixed-length arm assertions and added coincident, near-parallel, tiny-distance, and excessive-reach cases. Visually inspected left/right turns, held bank, airborne extension, and landing compression; hands/feet remain attached, joints remain bent, and WebGL reports zero errors.
+
+## Further CSS reduction
+
+- Fresh working-tree baseline with identical build settings: ZIP **23,827 → 23,589 bytes**, saving **238 bytes**. Source CSS **6,596 → 5,983 bytes**; production CSS **5,504 → 4,898 bytes**; packed HTML **59,322 → 58,508 bytes**. Both builds select frequency-inline; ZIP integrity passes. The archive remains 10,277 bytes over 13 KiB.
+
+- Inlined the three fixed color variables, retained runtime `--level`, removed the unused modal primary-button margin and pause override, and shared the minimap's 100% canvas width while preserving responsive container widths and canvas heights. Grouped the four identical tabular-number declarations: this saves another 7 ZIP bytes relative to the other edits alone. Grouping font weights increased ZIP size, so it was not retained.
+
+- Removed box/text shadows, backdrop blur, primary-button movement/transition, and the vignette element and styles. Focus outlines, hover brightness, colors, selection/warning borders, typography, spacing, breakpoints, and gameplay are preserved. Build/minifier configuration and runtime JavaScript are unchanged by this pass.
+
+- All **101 automated tests**, **52 packed-game checks**, and **64 source/production CSS comparisons** pass. The packed game reports no runtime/WebGL errors or subresource requests. The first packed-game run under forced software rendering missed the fixture's 80 ms pause-state wait; the unchanged fixture passes using normal Chrome rendering.
+
+- **512 before/after comparisons** preserve element geometry and non-decorative computed styles, including pseudo-elements: eight viewport sizes (including breakpoint boundaries and short/mobile screens), four screens, both themes, race/free play, normal/danger warnings, and speed levels 1/5. Comparisons exclude only removed decorative properties/color custom properties and equivalent unresolved percentage widths on hidden minimaps. Keyboard focus retains its 3 px solid outline with 5 px offset; hover retains brightness(1.08) with no translation or transition. Visually inspected 24 desktop/tablet/short-mobile screen/theme captures and live packed title, HUD/countdown, and pause views; controls and text remain positioned correctly.
+
+## Rainbow trailing foam
+
+- Trailing foam reuses the spray color function and cycles through rainbow bands at speed level 5. Levels 1–4 remain white; six flat foam triangles are still emitted each time. Existing particles keep their colors as they shrink away.
+- All 101 automated tests pass, including both particle types using the rainbow palette at low and high speeds only at level 5. Visually checked rainbow spray and foam in the wake fixture; WebGL reports OK.
+- Isolated production builds with unrelated inputs frozen: ZIP **23,589 → 23,593 bytes**, a change of **+4 bytes**.
+
+## Simpler spray strength, foam, and rainbow colors
+
+- Side-spray strength depends only on speed; removed the ahead-of-hull wave sample and crest-closing calculation. Foam uses flat shrinking triangles with one center water sample and no stored rotation. Level 5 switches directly to full rainbow spray colors instead of blending by speed; foam stays white.
+- All 101 automated tests pass, including full rainbow colors at low and high speeds. Visually checked ordinary and maximum-level spray with flat foam in the wake fixture; WebGL reports OK. Flat foam can intersect steep waves slightly, and crests no longer strengthen the spray fan.
+- Isolated builds with all unrelated source and build settings frozen: ZIP **23,942 → 23,827 bytes**, saving **115 bytes**; built HTML **59,561 → 59,322 bytes**. The current workspace build produces the same result.
+
+## WASD-only driving
+
+- Compared WASD-only and arrow-only variants with the same frequency-inline build settings: **23,596** versus **23,629 bytes**. Kept WASD and removed arrow handling and its default-action suppression. Escape pause and Enter start remain.
+- Direct input checks cover throttle, braking, both steering directions, and all four removed arrow mappings. All 52 packaged-game checks pass without runtime/WebGL errors or subresource requests. ZIP integrity passes; final archive is **23,596 bytes**.
+
+## Minimap direction marker removed
+
+- Removed the player heading triangle; all four position dots and the player dot outline remain. A drawing-command comparison confirms changing heading no longer changes minimap output.
+- Production build and ZIP integrity pass. ZIP: **23,972 → 23,942 bytes**, saving **30 bytes**.
+
+## Fixed-yaw handlebars
+
+- Isolated before/after builds using the same build configuration and all unrelated source frozen: ZIP **24,077 → 24,052 bytes**, saving **25 bytes**. Runtime source shrank by **228 bytes**. Other concurrent workspace optimizations are excluded from this comparison.
+
+- Removed handlebar yaw position/rate, its spring and interpolation, and yaw-dependent grip transforms. The remaining spring updates pitch directly with the original travel limits and damping. Steering still turns the craft and shifts the rider inward; the crossbar no longer twists.
+- All 100 automated tests pass. Pitch/suspension state matches the previous implementation exactly over 3,000 steps spanning left/right/neutral steering, flight, and varying vertical load. Updated tests cover fixed crossbar alignment, planted hands, pitch lift/reset, interpolation, and production equivalence.
+- Visually checked left/right turns and a jumping side view in the rider fixture; hands remain attached and the pole still lifts. WebGL reported zero errors.
+
+## Reef, HUD, and compression experiments
+
+- ZIP: **24,066 → 23,972 bytes**, saving **94 bytes**. Built HTML: **59,730 bytes**; CSS: **5,504 bytes** (129 bytes smaller). The frequency-inline candidate wins; ZIP integrity passes.
+
+- Replaced the two reef mapping expressions with one rock list and constructor. A common seed increment preserves the two original sequences. Original order, coordinates, dimensions, seeds, outer-reef subset, and generated island geometry match exactly.
+- Consolidated shared miss/speed-level panel styling, removed unused anchor styling, and removed the redundant single-column grid declaration. All 24 before/after title/HUD/pause/results layout and style comparisons pass across three sizes and both lighting themes.
+- Added build candidates for frequency-ordered GLSL names, JavaScript inline level 1, and their combination. Identifier ties use deterministic lexical ordering. Existing candidates remain available; the build always selects the smallest actual ZIP.
+- Tested shared clamp calls, a clamp01 helper, alternative module ordering, inline levels 0/1/2/3, and disabled reduce_funcs. Retained the useful build candidates; reverted math-helper changes because their compressed output was larger.
+- All 100 automated tests, 52 packed-game checks, and 64 production CSS comparisons pass, with no runtime/WebGL errors or subresource requests. All five source/optimized scenes render pixel-identically, including spray and foam. Sound cue scheduling matches exactly; waveform differences are comparable to repeated rendering of the original. No scenery or gameplay features were removed.
+
+## Particle, state, and sky-gradient cleanup
+
+- ZIP: **24,458 → 24,066 bytes**, saving **392 bytes**. Built HTML: **60,084 bytes**; CSS remains **5,633 bytes**. ZIP integrity passes.
+
+- Merged the identical wake/foam particle flags and moved droplet-only size, height, and color calculations into the droplet branch. Foam shapes, colors, wave sampling, and all particle counts remain unchanged.
+- Production omits the always-zero rider roll fields/interpolation, standalone updateRacer test path, and unused gate/miss event diagnostics. Development fixtures retain those fields and convenience checks. Removed duplicate racer initialization and replaced stored checkpoint indices with the existing array/nextGate indices; checkpoint index metadata remains development-only.
+- Sky and distance fog now share the same GLSL gradient helper, retaining star composition and all gradient constants. Extended shader-local renaming to preserve parameter qualifiers such as out, with a regression test.
+- All **100 automated tests** and **52 packed-game checks** pass, with no runtime/WebGL errors or subresource requests. GPU comparisons across all five courses, including foam and spray, are pixel-identical to the pre-change version. Sound note scheduling matches; maximum offline waveform difference is below one 16-bit PCM step.
+
+## Front-only flag markings
+
+- Arrows and finish checkerboards now appear only on the approach face (local -Z); the opaque colored flag hides them from behind. Placement, passing directions, colors, and buoy movement are unchanged.
+- Updated the marker regression test to require front markings and no rear markings for both buoy sides and active states.
+
+## Model generation simplification
+
+- Consolidated boxes through the existing tapered-box builder. Simplified rider accessories and torso, lighthouse details, fish bodies/fins, bird wings/details, and flag markings. Rider pose solving, physics, animal counts and paths, scenery, craft design, rainbow, and lighting are unchanged.
+- Compared builds from the working tree immediately before this pass: ZIP **24,458 → 24,134 bytes**, saving **324 bytes (1.3%)**; built HTML **61,347 → 60,317 bytes**. Combined `src/mesh.js` and `src/atmosphere.js` source is **15,641 → 14,294 bytes**, down **1,347 bytes (8.6%)**. The archive remains **10,822 bytes** over 13 KiB.
+- Triangle counts: rider **390 → 260**, lighthouse **762 → 324**, ordinary buoy **110 → 88**, finish buoy **206 → 118**, bird flock **342 → 180**, each fish **33 → 9**. These are geometry reductions, not measured frame-rate gains.
+- All **99 automated tests** pass, including production/source equivalence and new box-normal, marker-direction, and deterministic wildlife checks. The actual packed game passes **52 browser checks** across all five modes with no runtime/WebGL errors or subresource requests.
+- Compared baseline/current rider views and inspected banking, steering, jumping, and landing compression. Hands/feet stay planted and the torso meets the helmet after removal of the neck block. Inspected both faces of arrows/checkerboards, day/night lighthouse views, animated fish/birds, and the frozen full scene. WebGL reported zero errors.
+- Baseline/current comparisons confirm island and craft colored surfaces and normals match despite box triangulation changes; rainbow, seabed, seagrass, and beacon vertex data match exactly. Only `src/mesh.js` and `src/atmosphere.js` changed among runtime/build source files during this pass.
+- Visible tradeoffs: boxier rider torso, bare lighthouse lantern area without supports/railings, pointed fish without side fins, and plain triangular bird wings without dark tips. Flat flag markings are offset on both sides to remain visible from either approach.
+
+## Approximate hull spray contacts
+
+- Replaced the transformed hull-side bisection search (up to eight water samples per contact) with one sample at a fixed lateral offset and approximate pitch/roll height offsets. Dry or submerged sections skip side spray; crest response remains. This affects visual spray placement only, not buoyancy or collision physics.
+- All 97 automated tests pass, including single-sample contact, dry/submerged rejection, bank/trim, and yaw checks. Visually inspected ordinary foam and side spray in the wake fixture; WebGL reports OK.
+- Before/after production builds selected combined transforms: ZIP **24,807 → 24,506 bytes**, saving **301 bytes**; built HTML **62,255 → 61,478 bytes**.
+
+## Foam-only particle wakes
+
+- Replaced the two expanding ripple-arc particles with ordinary shrinking foam triangles, retaining six wake particles per emission. Removed the ripple flag and segmented quad geometry; spray, rainbow eligibility, particle limits, and water physics remain unchanged.
+- All 96 automated tests pass. The wake fixture renders white foam and side spray at levels 1 and 5 with WebGL OK; visually inspected both levels. Wake assertions verify six flecks per emission and no ripple arcs.
+- Using identical production build settings, ZIP size fell from **24,870 to 24,807 bytes**, saving **63 bytes**. Built HTML fell from **62,411 to 62,255 bytes** (156 bytes). Both builds selected the combined transforms candidate.
+
+## Production transforms and shared runtime code
+
+- Removed unread finish-order storage; interpolation keeps its stored view only in development. Production strips checkpoint channel metadata and redundant course defaults, checking that callers supply the required arguments. The default course used by procedural fish remains intact.
+- Added token-aware shader-local renaming, scoped WebGL constant inlining, and context-aware numeric encoding for race phases, events, and lighting. Browser strings, shader interfaces/swizzles, and course IDs retain their meaning. Added the private course field to property shortening. Each build compares the real compressed candidates and selects the smallest.
+- Shared fullscreen rendering setup, sound cue playback, and title/countdown moored physics. Removed the Start button wrapper and unnecessary layout rules. The generic uniform helper increased ZIP size, so direct uniform calls remain. No object counts or features were reduced; the lighthouse lens flare is preserved.
+- All **95 automated tests**, **52 packed-game checks**, **64 CSS comparisons**, and **9 before/after menu geometry comparisons** pass. All five source/optimized scenes render pixel-identically. Audio note scheduling matches exactly; maximum waveform difference is 0.000018634, compared with 0.000018630 when rendering the original twice. No packed-game runtime/WebGL errors or subresource requests; ZIP integrity passes.
+- ZIP: **25,510 → 24,666 bytes**, saving **844 bytes**. The starting baseline includes the newer lighthouse flare. Built HTML: **61,772 bytes**; CSS: **5,633 bytes**. The combined transforms win over the baked-shader candidate (24,837 bytes).
+
+## Course buttons with direct handlers
+
+- Replaced repeated static course-button HTML with buttons created directly from course data. Labels use textContent; each click handler closes over its course ID. A selected class is updated in code, with no data-course/aria-pressed attributes or inner bold wrappers. The selected button remains clickable.
+- Course names now serve the production UI, so metadata stripping retains them and no longer rewrites the course constructor signature. Updated browser fixtures to select generated buttons and verify their selected class; CSS checks populate the same generated labels.
+- All 90 automated tests, 52 packed-game checks across all five courses, and 64 CSS layout comparisons pass. No runtime/WebGL errors or subresource requests; ZIP integrity passes.
+- ZIP: **25,438 → 25,409 bytes**, saving **29 bytes**. Built HTML: **64,879 bytes**; CSS: **5,748 bytes**.
+
+## Smaller race UI and color constants
+
+- Removed the live leaderboard, its row generator/update cache/styles, and the finish placing/time summary. Every finishing place uses “Race complete”; five-miss losses still use “Race over.” Result ranks are 1–4, without leading zeroes. Per-rider finish times remain in the results list.
+- Replaced the five decorative speed-bar `<i>` elements and class updates with one masked CSS gradient driven by the speed level. Removed the redundant `aria-hidden` on those empty decorations; course selection still uses `aria-pressed`.
+- Rounded constant shader color vectors to one decimal for values at least .1, retaining two decimals below .1 so dark night colors do not disappear. Shader geometry, waves, spectral phase offsets, and vehicle blob shadows are unchanged. Sun-disc and flare source colors were updated together.
+- Dynamic course button experiments were larger after compression: **25,451 bytes** with a label table, or **25,445 bytes** sharing labels with course data, versus **25,438 bytes** for static buttons. Kept static HTML.
+- All 90 automated tests, 52 packed-game checks, 15 speed-level/loss checks, 64 CSS layout comparisons, and six flare GPU checks pass. Verified all four finish positions show the same heading and unpadded ranks with no extra summary/leaderboard. Visually checked the gradient gauge and rounded night colors. ZIP integrity passes; no packed-game runtime/WebGL errors or subresource requests.
+- ZIP: **25,774 → 25,438 bytes**, saving **336 bytes**. Built HTML: **65,276 bytes**; CSS: **5,785 bytes**.
+
+## Broader production property shortening
+
+- Expanded the explicit internal-field allowlist for simulation state, geometry, rendering, audio, and rider/buoy fields. Browser, WebGL, Web Audio, and dataset names keep their public spelling. Readable source names remain intact.
+- Rider and hull loops use explicit axis/rate pairs. Build-only Terser key annotations coordinate computed accesses, interpolation lists, and axis comparisons with direct property accesses. The build rejects reintroduced rate-name concatenation.
+- All 90 automated tests pass, including expanded production parity coverage for rider meshes, handlebar rates, and interpolated buoy fields. A 1,200-step rough-water comparison exactly matches the pre-change physics.
+- All 52 packed-game checks pass without runtime/WebGL errors or subresource requests. Property-shortened and unshortened builds produce pixel-identical renders across all five modes; maximum stereo audio difference is 0.00000012. ZIP integrity passes, and the final build settings reproduce the packaged HTML byte for byte.
+- ZIP: **26,138 → 25,774 bytes**, saving **364 bytes**. Built HTML: **66,168 bytes**. CSS remains **6,150 bytes**; no features or object counts changed.
+
+## Shared geometry, UI, lighting, and shoreline helpers
+
+- Fairings and rider torsos share tapered-box construction. Leaderboard/results share row markup and common CSS; menu returns and course selection share reset code; blur and hidden-tab events share one pause handler.
+- Race and title lighting share the altitude/azimuth calculation. Seabed generation, AI clearance, and surf audio share shoreline-distance math while retaining their existing margins. Geometry, lighting, seabed, and surf comparisons against the previous source match exactly, including the steep island.
+- Removed per-island `collisionScale`: every landform now uses the main beach's fixed .915 collision margin. The smaller island remains steep. Updated shoreline/reef assertions for the common contact boundary; boost-reset behavior is preserved.
+- All 89 automated checks pass across the full run and targeted rerun of the 27 simulation/reef checks after updating collision expectations. All 52 packed-game checks and 64 CSS layout comparisons pass. No runtime/WebGL errors or subresource requests; ZIP integrity passes.
+- ZIP: **26,264 → 26,138 bytes**, saving **126 bytes**. Built HTML: **68,415 bytes**; CSS: **6,150 bytes**. All scenery and racer counts are unchanged.
+
+## Shared controllers, rendering, audio, and shader build experiment
+
+- All preview riders now use the opponents' look-ahead controller. Player ID 0 uses the leading rival's speed targets with the player's normal physics multiplier; manual controls are unchanged. All four courses finish reliably; the offshore integration run finished in 117.33 seconds with no player misses and the existing rough-water clearance bound intact. Updated its old minimum-duration assertion for the faster controller.
+- Fish, gulls, riders, and particles share dynamic-buffer upload/draw code. Water vertices use a constant unused color instead of random values. Side-by-side GPU captures were pixel-identical on all five modes, including impact particles; mesh and scenery counts are unchanged.
+- Shared audio gain/filter creation, engine chains, playback/cleanup, and envelopes preserve all sound parameters. Ten offline waveform comparisons (engines, small/large splashes, gulls, and cues, with/without stereo panners) passed. Maximum differences in the final comparison were below 0.0000003, comparable to rendering the original twice.
+- Added a build candidate that evaluates shader templates and compacts numeric literals. Tests verify all five shader programs remain equivalent apart from comments/whitespace/numeric spelling. Baked shaders produced a **26,498-byte ZIP**, 234 bytes larger than the selected runtime-template variant, so automatic size selection retains the smaller output.
+- All 89 automated tests, 36 browser mode checks, and 52 packed-game checks pass, with no runtime/WebGL errors or subresource requests. ZIP integrity passes. Final ZIP: **26,634 → 26,264 bytes**, saving **370 bytes**. Individually restoring the old audio, renderer, or simulation module increases the final ZIP by 70, 83, or 242 bytes respectively (compression savings are not additive).
+
+## Stronger ZIP compression
+
+- Packaging now compares zlib level 9 with Zopfli at 15 and 1,000 iterations and keeps the smallest stream. The selected iteration count is recorded in the size report. This remains ordinary ZIP Deflate.
+- On the current HTML, 15/100/500/1,000 iterations produced 26,645/26,643/26,636/26,634-byte ZIPs. A 5,000-iteration experiment reached 26,632 bytes but took about five times longer than 1,000; alternative block splitting settings did not improve it.
+- All three production/packaging tests pass, including deterministic Unicode round trips and minification parity. `unzip -t` passes. Extracted content is unchanged: built HTML is byte-for-byte identical to the previous build.
+- ZIP: **26,645 → 26,634 bytes**, saving **11 bytes**.
 
 ## Remove redundant HUD text and unused metadata
 
@@ -367,3 +548,20 @@
 - The ZIP contains only `index.html`, passes archive integrity verification, and the HTML contains no external script or stylesheet references. Its JavaScript also passes a standalone syntax check.
 
 Run `npm run build` and `npm run check:size` for the current archive size. The first pass deliberately does not enforce the eventual 13,312-byte limit. Subjective handling and audio balance remain open to player feedback.
+
+### Shader name reuse and caustics review (2026-09-13)
+
+- Added conservative short-name reuse across disjoint GLSL functions and value-preserving numeric shortening independent of template baking. Generated-shader token checks and scope/global-name fixtures pass.
+- Full Node suite passed 107 tests. After restoring the original caustics, the seven production tests and seven transform tests passed again.
+- Removing the nested caustic distortion produced a visible grid and was rejected by the user. The original expression is restored in source and production. Single-sample foam remains preview-only because it visibly reduces texture detail.
+- `/test/caustics.html` defaults to the restored original, with a rejected-grid comparison, freeze, two cameras, lighting selection, and an optional foam trial. All preview variants inspected rendered without WebGL errors.
+- Final build selected `scoped-numbers`: 56,376 HTML bytes / 23,010 ZIP bytes. The same build's previous `frequency-inline` configuration was 23,039 ZIP bytes, so the retained shader optimizations save 29 bytes. Scoped-only tied at 23,010 ZIP bytes.
+- Restored packed game passed all 52 browser checks across five modes, without runtime/WebGL errors or subresource requests. ZIP round-trip and `git diff --check` passed. The package remains 9,698 bytes over 13 KiB.
+
+### Rival engine mix simplification (2026-09-13)
+
+Replaced the product of distance fades with one fifth-power fade and reused the shared clamp for stereo panning. Retained speed-dependent gain, the speed cap, camera-relative stereo, overlap protection, and silence at 140 units. Nearby rivals are slightly quieter (about 1 dB at 12 units). Both rival-audio tests pass, covering direction, camera reversal, overlap, monotonic attenuation, finite bounded panning, cutoff, and speed saturation. Full production build is 23,003 ZIP bytes versus 23,010 before this change (7 bytes saved after candidate selection). `git diff --check` passes.
+
+### Bird mesh generator simplification (2026-09-13)
+
+Replaced four explicit body triangle calls with two existing quad-helper calls, retaining the original diagonals and winding. A before/after comparison at times 0, 12, 12.25, and 100 confirmed identical triangle membership, vertex positions, colors, and normals (maximum normal difference zero). All 18 birds retain 10 triangles each and their existing flight/flapping animation. The three mesh tests and `git diff --check` pass. Source is 71 bytes shorter. Full rebuild is 22,996 ZIP bytes versus 23,003 previously: 7 bytes saved after candidate selection.

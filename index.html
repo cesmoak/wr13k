@@ -10,29 +10,22 @@
 </head>
 <body>
   <canvas id="game"></canvas>
-  <div id="vignette"></div>
   <main id="title-screen" class="title-screen">
     <div class="hero-copy">
       <h1>SUNWAKE<br><span>RUSH</span></h1>
-      <div class="course-menu" role="group">
-        <button type="button" data-course="free" aria-pressed="false"><b>Free play</b></button>
-        <button type="button" data-course="main" aria-pressed="true"><b>Main island loop</b></button>
-        <button type="button" data-course="reverse" aria-pressed="false"><b>Main island reverse</b></button>
-        <button type="button" data-course="rocky" aria-pressed="false"><b>Rocky island loop</b></button>
-        <button type="button" data-course="sunrise" aria-pressed="false"><b>Sunrise reef loop</b></button>
-      </div>
-      <div class="start-row"><button id="start" class="primary">START</button></div>
+      <div class="course-menu" role="group"></div>
+      <h2 id="finish-title" hidden>Race complete</h2>
+      <div id="result-list" hidden></div>
+      <button id="start" class="primary">START</button>
+      <button id="course-menu" class="secondary" hidden>COURSES</button>
     </div>
   </main>
   <section id="hud" hidden>
     <div class="race-top"><div class="position"><span class="small-label">POSITION</span><div><b id="position">4</b><span>/ 4</span></div></div><div class="race-stat"><span class="small-label">RACE TIME</span><b id="timer">00:00.00</b></div></div>
     <div class="map-panel"><canvas id="map" width="300" height="228"></canvas></div>
-    <div class="leaderboard" id="leaderboard"></div>
-    <div class="telemetry"><div id="miss-counter" role="status"><span>MISSED BUOYS</span><b id="misses">0 / 5</b></div><div id="speed-level" class="speed-level" role="status"><div class="speed-level-label"><span>SPEED LEVEL</span><b id="speed-level-value">1 / 5</b></div><div class="speed-level-bars" aria-hidden="true"><i class="active"></i><i></i><i></i><i></i><i></i></div></div><div class="speed"><b id="speed">0</b><span>KM/H</span></div></div>
+    <div class="telemetry"><div id="miss-counter" role="status"><span>MISSED BUOYS</span><b id="misses">0 / 5</b></div><div id="speed-level" class="speed-level" role="status"><div class="speed-level-label"><span>SPEED LEVEL</span><b id="speed-level-value">1 / 5</b></div><div class="speed-level-bars"></div></div><div class="speed"><b id="speed">0</b><span>KM/H</span></div></div>
   </section>
   <div id="countdown" hidden>3</div>
-  <section id="pause-screen" class="modal-wrap" hidden><div class="modal"><button id="resume" class="primary">RESUME</button><button id="course-menu" class="secondary">COURSES</button></div></section>
-  <section id="results" class="modal-wrap" hidden><div class="modal results-card"><h2 id="finish-title">Nice wake.</h2><p id="finish-summary"></p><div id="result-list"></div><button id="back-home" class="secondary">COURSES</button></div></section>
   <script type="module" src="src/main.js"></script>
 </body>
 </html>

@@ -33,7 +33,7 @@ test('free-play riders keep cruising beyond three circuits, pause together, and 
   }
   assert.ok(crossings.slice(1).every(n=>n>COURSES.main.gates.length*3),`Each rider keeps circling: ${crossings}`);
   assert.equal(race.phase,'racing');assert.equal(race.time,0);
-  assert.deepEqual(race.finishOrder,[]);assert.equal(race.buoys.length,0);
+  assert.ok(race.racers.every(r=>r.finishTime===null));assert.equal(race.buoys.length,0);
   race.phase='paused';const paused=structuredClone(race.racers);
   stepRace(race,{},1);assert.deepEqual(race.racers,paused);
   startRace(race);

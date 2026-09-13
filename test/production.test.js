@@ -3,25 +3,65 @@ import assert from 'node:assert/strict';
 import { runInNewContext } from 'node:vm';
 import { inflateRawSync } from 'node:zlib';
 import { readFile } from 'node:fs/promises';
-import { readScripts, modules, compactScript, stripMetadata, packageHTML } from '../scripts/optimize.mjs';
+import { readScripts, modules, compactScript, stripMetadata, packageHTML, precompileShaders, markPropertyKeys, shortenShaderLocals } from '../scripts/optimize.mjs';
 import { zipHTML } from '../scripts/zip.mjs';
+import {shaderNames,renameShaderTokens} from '../scripts/glsl.mjs';
 
-test('build strips unused metadata and retains course selection attributes',async()=>{
+test('build strips unused metadata and retains labels for generated course buttons',async()=>{
   const source=await readScripts(),stripped=stripMetadata(source);
   assert.ok(!source.includes('Changing skies · explore three islands'));
   assert.ok(!stripped.includes('Changing skies · explore three islands'));
   assert.ok(!stripped.includes('sideSpray:true'));
   // If a future feature reads metadata, don't silently remove its input.
-  assert.throws(()=>stripMetadata(source+'\nCOURSES.main.name;'),/now used at runtime/);
-  assert.throws(()=>stripMetadata(source+'\nCOURSES.main["name"];'),/now used at runtime/);
+  assert.throws(()=>stripMetadata(source+'\nCOURSES.main.slalom;'),/now used at runtime/);
+  assert.throws(()=>stripMetadata(source+'\nCOURSES.main["slalom"];'),/now used at runtime/);
   const html=await readFile('index.html','utf8');
   assert.ok(!html.includes('rel="icon"'),'no favicon markup remains');
   const packed=await packageHTML(html,'','');
   assert.ok(!packed.includes('data:image/svg+xml'));
   assert.ok(!packed.includes('theme-color')&&!packed.includes('name="description"'));
   assert.ok(packed.includes('charset=')&&packed.includes('viewport'));
-  assert.ok(!packed.includes('aria-label=')&&packed.includes('aria-pressed="true"'));
-  assert.ok(packed.includes('data-course="main"'));
+  assert.ok(!packed.includes('aria-label=')&&!packed.includes('aria-pressed=')&&!packed.includes('data-course='));
+  assert.ok(stripped.includes('Main island loop')&&stripped.includes('course.name'));
+});
+
+test('build-time shaders preserve all five generated shader programs',async()=>{
+  const source=await readScripts(modules.filter(name=>name!=='main'));
+  const probe='\nglobalThis.shaders=[vertexSource,fragmentSource,skyVertex,skyFragment,flareFragment];';
+  const original={},baked={};
+  runInNewContext(source+probe,original);
+  runInNewContext(precompileShaders(source)+probe,baked);
+  const tokens=s=>s.replace(/\/\/[^\n]*(?:\n|$)|\/\*[\s\S]*?\*\//g,'')
+    .replace(/(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?|[A-Za-z_]\w*/g,value=>/^\d|^\.\d/.test(value)?String(Number(value)):value).replace(/\s+/g,'');
+  for(let i=0;i<5;i++)assert.equal(tokens(baked.shaders[i]),tokens(original.shaders[i]));
+});
+
+test('shader-local shortening also rewrites conditional and generated GLSL strings',async()=>{
+  const source=await readScripts(modules.filter(name=>name!=='main'));
+  const probe='\nglobalThis.shaders=[vertexSource,fragmentSource,skyVertex,skyFragment,flareFragment];';
+  for(const frequency of [false,true]){
+    const original={},packed={};runInNewContext(source+probe,original);runInNewContext(shortenShaderLocals(source,frequency)+probe,packed);
+    for(let i=0;i<5;i++)assert.equal(packed.shaders[i],renameShaderTokens(original.shaders[i],shaderNames(original.shaders[i],frequency)));
+  }
+});
+
+test('property shortening coordinates indirect keys without renaming DOM IDs or APIs',async()=>{
+  const source=`
+    const state={handlePitch:.4,handlePitchRate:.2,anchorX:12,leanX:.1};
+    const output=[];
+    for(const [axis,rate] of [['handlePitch','handlePitchRate']])output.push(state[axis],state[rate]);
+    for(const key of ['anchorX','leanX'])output.push(state[key]);
+    output.push(document.getElementById('speed').textContent);
+    globalThis.probe=()=>output;
+  `;
+  const packed=await compactScript(source,{shaders:false,metadata:false});
+  assert.ok(!packed.includes('handlePitch')&&!packed.includes('anchorX'));
+  assert.ok(packed.includes('getElementById')&&packed.includes('textContent'));
+  const context={document:{getElementById:id=>{assert.equal(id,'speed');return {textContent:'42'};}}};
+  runInNewContext(packed,context);
+  assert.equal(JSON.stringify(context.probe()),JSON.stringify([.4,.2,12,.1,'42']));
+  assert.throws(()=>markPropertyKeys('const key=axis+"Rate";'),/explicit property pair/);
+  assert.throws(()=>markPropertyKeys('const key=`${axis}Rate`;'),/explicit property pair/);
 });
 
 test('production minification preserves physics, checkpoints, interpolation, and generated geometry',async()=>{
@@ -32,17 +72,20 @@ test('production minification preserves physics, checkpoints, interpolation, and
     globalThis.probe=()=>{
       const output=[];
       const pose=r=>[r.x,r.y,r.z,r.vx,r.vy,r.vz,r.yaw,r.pitch,r.roll,r.speed,
-        r.speedLevel,r.nextGate,r.passed,r.misses,r.lap,r.finishTime,r.contactFraction,
-        r.rider.x,r.rider.y,r.rider.z,r.rider.pitch,r.rider.roll,r.rider.handlePitch];
+        r.speedLevel,r.nextGate,r.passed,r.misses,r.lap,r.finishTime,
+        r.rider.x,r.rider.y,r.rider.z,r.rider.pitch,r.rider.handlePitch,
+        r.rider.pitchRate,r.rider.handlePitchRate];
       for(const course of Object.values(COURSES)){
         const race=createRace(course.id),presentation=new RacePresentation();startRace(race);
         for(let i=0;i<900;i++){
           presentation.capture(race);
           stepRace(race,course.freePlay?{throttle:1,steer:Math.sin(i/130)*.3}:aiInput(race.racers[0],race),1/60);
-          if(i%90===0)output.push([race.time,race.worldTime,race.phase,
-            race.racers.map(pose),presentation.sample(race,.43).racers.map(pose)]);
+          if(i%90===0)output.push([race.time,race.worldTime,['title','countdown','racing','paused','finished','lost'].indexOf(race.phase),
+            race.racers.map(pose),presentation.sample(race,.43).racers.map(pose),
+            presentation.sample(race,.43).buoys.map(b=>[b.x,b.y,b.z,b.anchorX,b.anchorZ,b.leanX,b.leanZ,b.tiltVX,b.tiltVZ])]);
           race.events.length=0;
         }
+        for(const r of race.racers)output.push(createRiderMesh(r).data);
         if(!course.freePlay){
           for(const r of race.racers){
             r.passed=0;r.nextGate=0;r.misses=0;r.finishTime=null;race.phase='racing';
@@ -53,7 +96,7 @@ test('production minification preserves physics, checkpoints, interpolation, and
               race.time+=1;checkGate(r,old,race);output.push(pose(r));
             }
           }
-          output.push([race.phase,race.finishOrder,race.events.map(e=>[e.type,e.id,e.level])]);
+          output.push([['title','countdown','racing','paused','finished','lost'].indexOf(race.phase),race.racers.map(r=>r.finishTime),race.events.map(e=>[['beep','go','splash','gate','speedLevel','impact','miss','lap','finish','lose'].indexOf(e.type),e.id,e.level])]);
         }
       }
       for(const mesh of [createIslandMesh(),createSeabedMesh(),createSeaGrassMesh(),
@@ -63,7 +106,7 @@ test('production minification preserves physics, checkpoints, interpolation, and
     };`;
   const original={},packed={};
   runInNewContext(source+probe,original);
-  const compiled=await compactScript(source+probe);
+  const compiled=await compactScript(source+probe,{baked:true,locals:true,webgl:true,enums:true,frequency:true,inline:1});
   assert.ok(!compiled.includes('contactPoints'),'development contact diagnostics are excluded');
   runInNewContext(compiled,packed);
   assert.equal(packed.probe(),original.probe());
@@ -79,4 +122,14 @@ test('ZIP is deterministic, contains just index.html, and round-trips Unicode',a
   assert.equal(zip.subarray(30,start).toString(),'index.html');
   assert.equal(inflateRawSync(zip.subarray(start,start+size)).toString(),html);
   assert.equal(zip.readUInt16LE(zip.length-12),1);
+});
+
+test('scope reuse and numeric shortening preserve generated shader tokens',async()=>{
+  const source=await readScripts(modules.filter(name=>name!=='main'));
+  const probe='\nglobalThis.shaders=[vertexSource,fragmentSource,skyVertex,skyFragment,flareFragment];';
+  const original={},packed={};
+  runInNewContext(source+probe,original);
+  runInNewContext(shortenShaderLocals(source,true,{scoped:true,numbers:true})+probe,packed);
+  const normalize=s=>s.replace(/\/\/[^\n]*|\/\*[\s\S]*?\*\//g,'').replace(/(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?|[A-Za-z_]\w*|[^\s]/g,t=>/^(?:\d|\.\d)/.test(t)?String(Number(t)):t).replace(/\s+/g,'');
+  for(let i=0;i<5;i++)assert.equal(normalize(packed.shaders[i]),normalize(renameShaderTokens(original.shaders[i],shaderNames(original.shaders[i],true,true))));
 });

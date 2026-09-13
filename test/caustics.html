@@ -1,0 +1,41 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Caustics comparison</title>
+<style>body{margin:0;background:#123;color:#fff;font:14px sans-serif}canvas{width:100vw;height:100vh;display:block}aside{position:fixed;left:16px;top:16px;max-width:560px;padding:16px;background:#123e;border-radius:8px}button,select{font:inherit;padding:9px;margin:4px}p{margin:8px 4px}#status{font-size:12px}</style>
+<canvas></canvas><aside><strong>Underwater caustics comparison</strong><p>Switch at the same camera and time. Freeze to inspect the pattern.</p>
+<select id="variant"><option value="old">Original caustics (restored)</option><option value="new">Grid experiment (rejected)</option></select>
+<button id="freeze">Freeze</button><button id="camera">Beach / channel</button>
+<select id="light"><option>day</option><option>night</option><option>sunset</option></select>
+<p><label><input id="foam" type="checkbox"> Try less detailed foam (preview only)</label></p><p id="status"></p></aside>
+<script type="module">
+import {Renderer,TITLE_CAMERA} from '../src/renderer.js';
+import {createRace} from '../src/simulation.js';
+const original='sin(vWorld.x*.7+sin(vWorld.z*.43+uTime)*1.6)',simplified='sin(vWorld.x*.7+uTime)';
+class PreviewRenderer extends Renderer{
+ makeProgram(vs,fs){if(fs.includes('float caustic='))this.waterSources=[vs,fs];return super.makeProgram(vs,fs);}
+}
+const renderer=new PreviewRenderer(document.querySelector('canvas')),race=createRace('free');
+const [vs,fs]=renderer.waterSources,programs=new Map();
+programs.set('old-false',renderer.program);
+function select(){
+ const mode=document.querySelector('#variant').value,foam=document.querySelector('#foam').checked,key=mode+'-'+foam;
+ if(!programs.has(key)){
+  let shader=mode==='new'?fs.replace(original,simplified):fs;
+  if(foam)shader=shader.replace('float bubbles=foamNoise(vWorld.xz*1.65+vec2(-uTime*.45,uTime*.3));','').replace('patches*.65+bubbles*.35','patches');
+  programs.set(key,renderer.makeProgram(vs,shader));
+ }
+ renderer.program=programs.get(key);
+ for(const name of Object.keys(renderer.loc))renderer.loc[name]=renderer.gl.getUniformLocation(renderer.program,name);
+ renderer.attr=['aPosition','aNormal','aColor'].map(name=>renderer.gl.getAttribLocation(renderer.program,name));
+}
+document.querySelector('#variant').onchange=select;document.querySelector('#foam').onchange=select;
+race.phase='title';race.worldTime=12;race.lightingCourse={...race.course,lighting:'day'};
+Object.assign(race.racers[0],{x:0,z:105,y:0});
+let frozen=false,channel=false,last=0;
+function camera(){TITLE_CAMERA.eye=channel?[183,13,5]:[0,13,108];TITLE_CAMERA.target=channel?[153,-3,5]:[0,-3,83];}
+camera();
+document.querySelector('#camera').onclick=()=>{channel=!channel;camera();};
+document.querySelector('#freeze').onclick=e=>{frozen=!frozen;e.target.textContent=frozen?'Resume':'Freeze';};
+document.querySelector('#light').onchange=e=>{race.lightingCourse={...race.course,lighting:e.target.value};renderer.lightingReady=false;};
+function frame(now){const dt=Math.min((now-last)/1000||0,1/30);last=now;if(!frozen)race.worldTime+=dt;renderer.draw(race,dt);
+ document.querySelector('#status').textContent=`${document.querySelector('#variant').selectedOptions[0].textContent} · time ${race.worldTime.toFixed(2)} · WebGL ${renderer.gl.getError()===0?'OK':'ERROR'}`;requestAnimationFrame(frame);}
+requestAnimationFrame(frame);
+</script></html>

@@ -33,7 +33,7 @@ test('reef rocks repel a hull instead of allowing it through the scenery',()=>{
   const race=createRace('free'),r=race.racers[0],rock=reefRocks[2];
   Object.assign(r,{x:rock.x+rock.rx*.5,z:rock.z,speedLevel:5});
   updateRacer(r,{},1/60,race);
-  assert.ok(r.x>rock.x+rock.rx);
+  assert.ok(Math.abs(r.x-rock.x-rock.rx*(shoreRadius(0)*.915+.028))<.1,'Reef rocks repel the hull to the shared waterline');
   assert.equal(r.speedLevel,1);assert.equal(r.misses,0);
 });
 

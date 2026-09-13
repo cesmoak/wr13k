@@ -1,10 +1,15 @@
 import { deflateRawSync, inflateRawSync } from 'node:zlib';
 import { deflateAsync } from '@gfx/zopfli';
 
-export async function zipHTML(html){
+export async function zipHTML(html,passes=[15]){
   const data=Buffer.from(html),name=Buffer.from('index.html');
-  const normal=deflateRawSync(data,{level:9}),strong=Buffer.from(await deflateAsync(data,{numiterations:15}));
-  const compressed=strong.length<normal.length?strong:normal;
+  const normal=deflateRawSync(data,{level:9});
+  let compressed=normal,iterations=0;
+  // Retain the cheaper result too: extra search is not guaranteed to win.
+  for(const numiterations of passes){
+    const strong=Buffer.from(await deflateAsync(data,{numiterations}));
+    if(strong.length<compressed.length){compressed=strong;iterations=numiterations;}
+  }
   if(!inflateRawSync(compressed).equals(data))throw Error('Compressed HTML failed its round-trip check');
   let crc=0xffffffff;
   for(const byte of data){crc^=byte;for(let i=0;i<8;i++)crc=(crc>>>1)^((crc&1)?0xedb88320:0);}
@@ -16,5 +21,5 @@ export async function zipHTML(html){
   central.writeUInt32LE(crc,16);central.writeUInt32LE(compressed.length,20);central.writeUInt32LE(data.length,24);central.writeUInt16LE(name.length,28);
   end.writeUInt32LE(0x06054b50);end.writeUInt16LE(1,8);end.writeUInt16LE(1,10);
   end.writeUInt32LE(central.length+name.length,12);end.writeUInt32LE(local.length+name.length+compressed.length,16);
-  return {zip:Buffer.concat([local,name,compressed,central,name,end]),deflateSaving:normal.length-compressed.length};
+  return {zip:Buffer.concat([local,name,compressed,central,name,end]),deflateSaving:normal.length-compressed.length,iterations};
 }

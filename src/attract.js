@@ -17,5 +17,5 @@ export function stepTitleRace(demo,dt){
     // Continue through the finish line instead of teleporting back to the grid.
     r.finishTime=null;r.passed=1;r.lap=1;r.misses=0;
   }
-  demo.events.length=0;demo.finishOrder.length=0;
+  demo.events.length=0;
 }

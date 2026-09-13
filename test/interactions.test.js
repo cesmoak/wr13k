@@ -2,7 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRace, startRace, stepRace } from '../src/simulation.js';
 import { collideBuoys, collideRacers, stepBuoys } from '../src/interactions.js';
-import { MAX_WAKES } from '../src/course.js';
 function pair(){
   const race=createRace(),[a,b]=race.racers;
   for(const r of race.racers)Object.assign(r,{x:1000+r.id*20,z:1000,y:0,yaw:0});
@@ -20,7 +19,6 @@ test('racer impacts conserve horizontal momentum and dissipate energy',()=>{
   assert.equal(a.speed,Math.hypot(a.vx,a.vz));
   assert.equal(a.speedLevel,4,'A bump alone does not count as a missed buoy');
   assert.equal(race.events.filter(e=>e.type==='impact').length,2);
-  assert.ok(race.wakes.length>0&&race.wakes.length<=MAX_WAKES);
 });
 test('glancing bumps preserve tangential motion and separating hulls receive no new impulse',()=>{
   const {race,a,b}=pair();a.vz=7;b.vz=7;

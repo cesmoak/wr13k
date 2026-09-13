@@ -44,7 +44,7 @@ renderer.drawLensFlare=(width,height)=>{
   `${visible.some((v,i)=>i<3&&v>before[i])?'PASS':'FAIL'} visible sun adds flare`,
   `${same(sunBefore,sunAfter)?'PASS':'FAIL'} sun center has no added bloom`,
   `${same(visible,hidden)?'PASS':'FAIL'} covered sun suppresses flare`,
-  `${same(hidden,moon)?'PASS':'FAIL'} night suppresses lens flare`,
+  `${same(hidden,moon)?'PASS':'FAIL'} night suppresses sun flare`,
   `${same(moon,behind)&&same(behind,outside)?'PASS':'FAIL'} behind-camera and offscreen sun suppress flare`,
   `${gl.getError()===0?'PASS':'FAIL'} no WebGL errors`
  ].join('\n');

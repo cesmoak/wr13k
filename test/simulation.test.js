@@ -41,7 +41,7 @@ test('ordered gates, crossing width, direction, three laps, and finish',()=>{
   const race=racing(),r=race.racers[0];cross(race,2);assert.equal(r.passed,0);
   cross(race,0,0,true);assert.equal(r.passed,0);
   for(let i=0;i<LAPS*GATE_COUNT+1;i++){race.time+=1;cross(race,i%GATE_COUNT);}
-  assert.equal(r.passed,LAPS*GATE_COUNT+1);assert.equal(r.lap,3);assert.equal(race.phase,'finished');assert.deepEqual(race.finishOrder,[0]);
+  assert.equal(r.passed,LAPS*GATE_COUNT+1);assert.equal(r.lap,3);assert.equal(race.phase,'finished');assert.equal(r.finishTime,race.time);
   cross(race,1);assert.equal(r.passed,LAPS*GATE_COUNT+1);
 });
 test('speed bonus is automatic, ignores the old boost input, and braking reduces speed',()=>{
@@ -96,7 +96,7 @@ test('all AI drivers finish three laps without recovery or invalid physics',()=>
     stepRace(race,aiInput(race.racers[0],race),dt);
     maxSpeed=Math.max(maxSpeed,race.racers[0].speed);
     const player=race.racers[0];
-    if(player.airborne)maxAirGap=Math.max(maxAirGap,player.y-waveHeight(player.x,player.z,race.worldTime,race.wakes)-.48);
+    if(player.airborne)maxAirGap=Math.max(maxAirGap,player.y-waveHeight(player.x,player.z,race.worldTime)-.48);
     recoveries+=race.events.filter(e=>e.type==='recover').length;race.events.length=0;
     for(const r of race.racers)assert.ok(Number.isFinite(r.x+r.y+r.z));
     if(race.racers.every(r=>r.finishTime!==null))break;
@@ -105,7 +105,7 @@ test('all AI drivers finish three laps without recovery or invalid physics',()=>
   assert.ok(maxSpeed>50,'AI target speeds follow the automatic buoy bonus');
   assert.ok(maxAirGap>1&&maxAirGap<6,`Rough-water jumps stay small without pinning the craft to waves: ${maxAirGap}`);
   assert.ok(race.racers[0].misses===0&&race.racers.slice(1).every(r=>r.misses<=2),'Player clears the course and opponents only rarely miss');
-  assert.equal(recoveries,0);assert.ok(race.time>120&&race.time<240,`Race duration on the extended offshore course: ${race.time}`);
+  assert.equal(recoveries,0);assert.ok(race.time>90&&race.time<180,`Shared look-ahead controller completes the offshore course promptly: ${race.time}`);
 });
 test('braking tightens turns and excess collision speed decays smoothly',()=>{
   const samples=[false,true].map(brake=>{
@@ -167,11 +167,11 @@ test('flat main island allows skimming beside the beach and blocks at the waterl
   }
 });
 
-test('steeper green island retains its original shoreline collision',()=>{
+test('steep green island uses the shared shoreline collision margin',()=>{
   const race=racing(),r=race.racers[0],island=islands[1];
   Object.assign(r,{x:island.x+island.rx*.6,z:island.z,vx:0,vz:0,speed:0,speedLevel:5});
   updateRacer(r,{},dt,race);
-  assert.ok(r.x>island.x+island.rx,'The steep island keeps its outer shore boundary');
+  assert.ok(Math.abs(r.x-island.x-island.rx*(shoreRadius(0)*.915+.028))<.1,'The steep island uses the same shore margin as the flat island');
   assert.equal(r.speedLevel,1);
 });
 
@@ -184,7 +184,7 @@ test('offshore checkpoints take racers around a distinct rocky island and back',
   assert.ok(gates[sea.at(-1).index+1].channel,'Return leg rejoins the original channel');
   const race=racing(),r=race.racers[0];
   Object.assign(r,{x:rock.x+rock.rx*.6,z:rock.z,yaw:0});updateRacer(r,{},dt,race);
-  assert.ok(r.x>rock.x+rock.rx,'The new rocky shoreline participates in collisions');
+  assert.ok(Math.abs(r.x-rock.x-rock.rx*(shoreRadius(0)*.915+.028))<.1,'The rocky shoreline uses the shared collision margin');
 });
 
 test('exposed offshore water is taller and choppier than the sheltered channel',()=>{
@@ -278,7 +278,7 @@ test('five total misses lose the race; each miss advances once without moving th
     assert.equal(r.speedLevel,1);
     if(miss<5){assert.equal(race.phase,'racing');cross(race,r.nextGate);assert.equal(r.misses,miss,'Clean buoys do not erase misses');}
   }
-  assert.equal(race.phase,'lost');assert.equal(r.finishTime,null);assert.deepEqual(race.finishOrder,[]);
+  assert.equal(race.phase,'lost');assert.equal(r.finishTime,null);assert.ok(race.racers.every(r=>r.finishTime===null));
   assert.equal(race.events.filter(e=>e.type==='lose').length,1);
   const snapshot=JSON.stringify(race);stepRace(race,{throttle:1},1);assert.equal(JSON.stringify(race),snapshot);
   startRace(race);assert.equal(race.racers[0].misses,0);assert.equal(race.phase,'countdown');

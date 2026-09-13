@@ -54,7 +54,7 @@ document.getElementById('rock-view').onclick=()=>{
 };
 station(10);let last=0;
 function frame(now){const dt=Math.min((now-last)/1000||0,1/30);last=now;race.worldTime+=dt;
- for(const r of race.racers)stepBoat(r,{},Math.max(dt,.001),race.worldTime,[],undefined,true);
+ for(const r of race.racers)stepBoat(r,{},Math.max(dt,.001),race.worldTime,undefined,true);
  renderer.draw(race,dt);
  document.getElementById('lighting').textContent=`WebGL ${renderer.gl.getError()===0?'OK':'ERROR'} · Camera ${renderer.eye[1].toFixed(2)} · Hull ${race.racers[0].y.toFixed(2)}`;
  requestAnimationFrame(frame);

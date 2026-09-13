@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { coursePoint, courseProgress, COURSES, RAINBOW_COLORS } from '../src/course.js';
-import { Renderer, courseLighting, projectSkyDirection, easeTitleLighting, flareAlignment } from '../src/renderer.js';
+import { hullSprayContact, Renderer, courseLighting, projectSkyDirection, easeTitleLighting, flareAlignment } from '../src/renderer.js';
 import { lookAt, multiply, perspective } from '../src/math.js';
 import { rgb } from '../src/mesh.js';
 
@@ -121,9 +121,9 @@ test('sun directions stay normalized across course profiles and the free-play cy
   }
 });
 
-function emit(speedLevel,boost=1){
+function emit(speedLevel,boost=1,speed=48){
   const renderer={particleClock:0,particles:[],wakeHeads:[],rainbowColors:RAINBOW_COLORS.map(rgb),random:()=>.5};
-  const r={id:0,x:0,y:0,z:0,yaw:0,speed:48,speedLevel,boost,airborne:false};
+  const r={id:0,x:0,y:0,z:0,yaw:0,speed,speedLevel,boost,airborne:false};
   const race={worldTime:1,phase:'racing',racers:[r]};
   Renderer.prototype.updateEffects.call(renderer,race,.07);
   r.z+=2;
@@ -131,14 +131,39 @@ function emit(speedLevel,boost=1){
   return renderer.particles;
 }
 
-test('only spray turns rainbow at maximum level; wakes remain broken white foam',()=>{
-  const white=p=>p.color.every((v,i)=>v===[.82,.94,.9][i]);
+test('spray and foam turn rainbow only at maximum level',()=>{
+  const white=p=>p.color.every((v,i)=>v===[.8,.9,.9][i]);
   for(const charge of [0,.5,.999,1])for(const level of [1,2,3,4,5]){
-    const particles=emit(level,charge),spray=particles.filter(p=>!p.wake),foam=particles.filter(p=>p.wake);
+    const particles=emit(level,charge),spray=particles.filter(p=>!p.foam),foam=particles.filter(p=>p.foam);
     assert.ok(spray.length>0&&foam.length>0);
     assert.ok(particles.every(p=>!p.corners),'no level emits ribbon quads');
-    assert.ok(foam.every(p=>p.foam&&white(p)&&Math.hypot(p.vx,p.vz)>0));
-    assert.ok(foam.some(p=>p.ripple)&&foam.some(p=>!p.ripple));
-    assert.ok(spray.every(p=>level===5?!white(p):white(p)));
+    assert.ok(foam.every(p=>p.foam&&Math.hypot(p.vx,p.vz)>0));
+    assert.equal(foam.length,12,'six foam flecks per emission');
+    assert.ok(foam.every(p=>!p.ripple),'no wake ripple arcs');
+    assert.ok(particles.every(p=>level===5?!white(p):white(p)));
+  }
+});
+
+test('approximate hull spray uses one wave sample and rejects dry or submerged sides',()=>{
+  const r={x:10,y:0,z:20,yaw:0};
+  let samples=0;
+  const water=(x,z,time)=>{
+    samples++;assert.equal(time,3);return 0;
+  };
+  assert.deepEqual(hullSprayContact(r,1,1,3,water),{x:10.7,y:.05,z:21});
+  assert.equal(samples,1);
+  assert.equal(hullSprayContact({...r,y:1},1,0,3,water),null);
+  assert.equal(hullSprayContact({...r,y:-1},1,0,3,water),null);
+  assert.equal(hullSprayContact({...r,roll:1},1,0,3,water),null);
+  assert.equal(hullSprayContact({...r,pitch:1},1,1,3,water),null);
+  const turned=hullSprayContact({...r,yaw:Math.PI/2},-1,1,3,water);
+  assert.ok(Math.abs(turned.x-11)<1e-12&&Math.abs(turned.z-20.7)<1e-12);
+});
+
+test('maximum-level spray and foam use full rainbow colors even at low speed',()=>{
+  const palette=RAINBOW_COLORS.map(rgb).map(c=>c.map(v=>v**2.2));
+  for(const speed of [4,16,48]){
+    const particles=emit(5,1,speed);
+    assert.ok(particles.every(p=>palette.some(c=>c.every((v,i)=>v===p.color[i]))));
   }
 });

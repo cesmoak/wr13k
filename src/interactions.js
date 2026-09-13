@@ -1,15 +1,15 @@
 import { clamp } from './math.js';
-import { gates, GATE_WIDTH, sampleWater, MAX_WAKES } from './course.js';
+import { gates, sampleWater } from './course.js';
 
 export function createBuoys(course) {
-  return (course?.gates||gates).flatMap(g => (g.index === 0 ? [-1,1] : [g.side]).map(side => {
-    const x=g.x+g.tangent.z*side*(g.width||GATE_WIDTH),z=g.z-g.tangent.x*side*(g.width||GATE_WIDTH);
-    return {gate:g.index,side,anchorX:x,anchorZ:z,x,z,y:0,vx:0,vz:0,leanX:0,leanZ:0,tiltVX:0,tiltVZ:0};
+  return (course?.gates||gates).flatMap((g,index) => (index === 0 ? [-1,1] : [g.side]).map(side => {
+    const x=g.x+g.tangent.z*side*g.width,z=g.z-g.tangent.x*side*g.width;
+    return {gate:index,side,anchorX:x,anchorZ:z,x,z,y:0,vx:0,vz:0,leanX:0,leanZ:0,tiltVX:0,tiltVZ:0};
   }));
 }
 export function stepBuoys(race,dt) {
   for(const b of race.buoys){
-    const water=sampleWater(b.x,b.z,race.worldTime,race.wakes);
+    const water=sampleWater(b.x,b.z,race.worldTime);
     b.y=water.height;
     // A damped mooring returns each buoy to its course position after a bump.
     for(const [axis,anchor,velocity,lean,tilt,normal] of [
@@ -52,8 +52,7 @@ function impact(race,a,other,hit,strength) {
   if(strength<2||a.impactCooldown>0)return;
   a.impactCooldown=.22;
   race.events.push({type:'impact',id:a.id,other,x:hit.x,z:hit.z,y:a.y,strength});
-  race.wakes.push({x:hit.x,z:hit.z,time:race.worldTime,amplitude:Math.min(.5,.12+strength*.012)});
-  race.wakes=race.wakes.slice(-MAX_WAKES);
+
 }
 export function collideBuoys(race,r) {
   if(r.finishTime!==null)return;

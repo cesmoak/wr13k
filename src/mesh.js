@@ -12,11 +12,14 @@ export class MeshBuilder {
     for (const p of [a, b, c]) this.data.push(...p, ...normal, ...color);
   }
   quad(a, b, c, d, color) { this.triangle(a, b, c, color); this.triangle(a, c, d, color); }
+  taperedBox(a,b,color,cap=false) {
+    for(let i=0;i<4;i++){const j=(i+1)%4;this.quad(a[i],b[i],b[j],a[j],color);}
+    if(cap)this.quad(...a,color);
+    this.quad(b[3],b[2],b[1],b[0],color);
+  }
   box(x, y, z, w, h, d, color) {
-    const a = [x-w/2,y-h/2,z-d/2], b=[x+w/2,y-h/2,z-d/2], c=[x+w/2,y+h/2,z-d/2], e=[x-w/2,y+h/2,z-d/2];
-    const f = [x-w/2,y-h/2,z+d/2], g=[x+w/2,y-h/2,z+d/2], j=[x+w/2,y+h/2,z+d/2], k=[x-w/2,y+h/2,z+d/2];
-    this.quad(a,e,c,b,color); this.quad(f,g,j,k,color); this.quad(a,f,k,e,color);
-    this.quad(b,c,j,g,color); this.quad(e,k,j,c,color); this.quad(a,b,g,f,color);
+    const ends=[-d/2,d/2].map(dz=>[[-1,-1],[-1,1],[1,1],[1,-1]].map(([dx,dy])=>[x+dx*w/2,y+dy*h/2,z+dz]));
+    this.taperedBox(...ends,color,true);
   }
   cone(x, y, z, bottom, top, height, color, sides = 8) {
     for (let i = 0; i < sides; i++) {
@@ -89,7 +92,7 @@ export function createIslandMesh() {
   return mesh;
 }
 export function createCraftMesh(id) {
-  const mesh=new MeshBuilder(),color=rgb(RACER_COLORS[id]),white=rgb('#f7f0dc'),dark=rgb('#263f43');
+  const mesh=new MeshBuilder(),color=rgb(RACER_COLORS[id]),white=rgb('#f7f0dc');
   const hull=(y,w,l,c)=>{
     const a=[-w,y,-l*.8],b=[w,y,-l*.8],d=[w*.68,y,l*.55],e=[0,y,l],f=[-w*.68,y,l*.55];
     const low=[0,y-.6,-.1];
@@ -99,10 +102,8 @@ export function createCraftMesh(id) {
   hull(.1,1.05,2.7,white); hull(.42,.89,2.35,color);
   // Low, tapered fairing follows the bow instead of a freestanding console cube.
   const rear=[[-.36,.43,.28],[.36,.43,.28],[.29,.65,.4],[-.29,.65,.4]];
-  const nose=[[-.24,.46,1.52],[.24,.46,1.52],[.18,.84,1.38],[-.18,.84,1.38]];
-  for(let i=0;i<4;i++){const j=(i+1)%4;mesh.quad(rear[i],nose[i],nose[j],rear[j],color);}
-  mesh.quad(...rear,color);mesh.quad(nose[3],nose[2],nose[1],nose[0],color);
-  for(const side of [-1,1]) mesh.box(side*.43,.4,-.25,.35,.25,.75,dark);
+  const nose=[[-.16,.46,2.05],[.16,.46,2.05],[.12,.84,1.95],[-.12,.84,1.95]];
+  mesh.taperedBox(rear,nose,color,true);
   const horn=new MeshBuilder();horn.cone(0,0,0,.13,0,.70,white,5);
   mesh.append(horn,modelMatrix(0,.48,1.85,0,.65));
   return mesh;
@@ -113,24 +114,17 @@ export function createRiderMesh(racer) {
   const pose = riderPose(racer), { hips } = pose;
   mesh.beam(pose.handlebar.pivot,pose.handlebar.center,.16,dark);
   mesh.beam(...pose.handlebar.ends,.12,dark);
-  mesh.sphere(...pose.handlebar.pivot,.2,.15,.15,dark,6,3);
   mesh.box(hips[0], hips[1], hips[2], .56, .27, .34, suit);
   for (const limb of pose.limbs) {
     mesh.beam(limb.hip, limb.knee, .28, suit);
     mesh.beam(limb.knee, limb.foot, .25, suit);
     mesh.beam(limb.shoulder, limb.elbow, .20, suit);
     mesh.beam(limb.elbow, limb.hand, .18, white);
-    // A planted boot defines the ankle and points forward along the deck.
-    mesh.box(limb.foot[0],.61,limb.foot[2]+.10,.27,.18,.48,dark);
-    mesh.sphere(...limb.hand,.12,.12,.12,dark,6,3);
+    // One boot reaches the deck without a separate footrest underneath.
+    mesh.box(limb.foot[0],.56,limb.foot[2]+.10,.27,.28,.48,dark);
   }
   const upper = new MeshBuilder();
-  const waist=[[-.24,-.4,-.15],[.24,-.4,-.15],[.24,-.4,.15],[-.24,-.4,.15]];
-  const shoulders=[[-.37,.24,-.19],[.37,.24,-.19],[.37,.24,.19],[-.37,.24,.19]];
-  for(let i=0;i<4;i++){const j=(i+1)%4;upper.quad(waist[i],shoulders[i],shoulders[j],waist[j],suit);}
-  upper.quad(shoulders[3],shoulders[2],shoulders[1],shoulders[0],suit);
-  upper.box(0, .02, .18, .49, .38, .06, color);
-  upper.box(0,.31,0,.20,.16,.20,rgb('#d6a47d'));
+  upper.box(0,-.05,0,.66,.7,.38,suit);
   upper.sphere(0, .57, .02, .26, .29, .28, color, 8, 5);
   upper.box(0, .60, .27, .39, .12, .07, dark);
   mesh.append(upper, pose.torsoMatrix);
@@ -145,27 +139,30 @@ export function createGateMesh(index, active=false, buoySide=gates[index].side,c
   mesh.cone(0,1.8,0,1.15,.3,3.4,color);
   mesh.box(0,6.2,0,.18,4,.18,dark);
   mesh.quad([0,8.2,0],[-buoySide*3.7,8.2,0],[-buoySide*3.7,6.5,0],[0,6.5,0],color);
-  // Dark chevron points toward the legal passing side.
-  const mid=-buoySide*1.8;
-  mesh.beam([mid+buoySide*.6,7.9,-.03],[mid-buoySide*.3,7.35,-.03],.22,dark);
-  mesh.beam([mid-buoySide*.3,7.35,-.03],[mid+buoySide*.6,6.8,-.03],.22,dark);
-  if(index===0)for(let row=0;row<2;row++)for(let col=0;col<4;col++)
-    mesh.box(-buoySide*(col+.5)*.9,6.9+row*.75,-.06,.9,.75,.1,(row+col)%2?dark:white);
+  // The approach face is local -Z; the flag hides markings from behind.
+  const z=-.06;
+  if(index===0)for(let row=0;row<2;row++)for(let col=0;col<4;col++) {
+    const x=-buoySide*col*.9,y=6.525+row*.75,end=x-buoySide*.9;
+    mesh.quad([x,y,z],[end,y,z],[end,y+.75,z],[x,y+.75,z],(row+col)%2?dark:white);
+  }
+  else {
+    const mid=-buoySide*1.8;
+    mesh.triangle([mid+buoySide*.6,7.9,z],[mid-buoySide*.6,7.35,z],[mid+buoySide*.6,6.8,z],dark);
+  }
   return mesh;
 }
 
 // A Wide, drive-through opening, aligned with the start/finish checkpoint.
 export function createRainbowMesh(courseGates=gates){
   const mesh=new MeshBuilder(),gate=courseGates[0],arc=new MeshBuilder(),segments=56;
-  RAINBOW_COLORS.forEach((hex,band)=>{
-    const outer=39-band*1.05,inner=outer-1.05,color=rgb(hex);
-    const point=(radius,angle,z)=>[Math.cos(angle)*radius,Math.sin(angle)*radius*.8-.6,z];
-    for(let i=0;i<segments;i++){
-      const a=i/segments*Math.PI,b=(i+1)/segments*Math.PI;
-      for(const z of [-.2,.2])arc.quad(point(outer,a,z),point(outer,b,z),point(inner,b,z),point(inner,a,z),color);
-      arc.quad(point(outer,a,-.2),point(outer,a,.2),point(outer,b,.2),point(outer,b,-.2),color);
-    }
-  });
+  const point=(radius,angle)=>[Math.cos(angle)*radius,Math.sin(angle)*radius*.8-.6,0];
+  for(let i=0;i<segments;i++){
+    const a=i/segments*Math.PI,b=(i+1)/segments*Math.PI;
+    arc.quad(point(39,a),point(39,b),point(31.65,b),point(31.65,a),[0,0,0]);
+  }
+  // Carry local circular coordinates in the color attribute for spectral shading.
+  // One two-sided surface avoids stacking transparency across seven solid bands.
+  for(let i=0;i<arc.data.length;i+=9){arc.data[i+6]=arc.data[i];arc.data[i+7]=(arc.data[i+1]+.6)/.8;}
   mesh.append(arc,modelMatrix(gate.x,0,gate.z,Math.atan2(gate.tangent.x,gate.tangent.z)));
   return mesh;
 }
@@ -175,17 +172,8 @@ export function createLighthouseMesh() {
   const mesh=new MeshBuilder(),white=rgb('#f5eed5'),coral=rgb('#ed796b'),dark=rgb('#243c55');
   mesh.cone(0,-7,0,9,7,9,white,12);
   for(let i=0;i<6;i++)mesh.cone(0,2+i*5,0,6-i*.45,6-(i+1)*.45,5,i%2?coral:white,12);
-  mesh.box(0,4,-6,2.3,4,.3,dark);
-  for(const y of [12,22])mesh.box(0,y,-(6-(y-2)*.09),1.4,2.4,.3,dark);
   mesh.cone(0,32,0,6,6,1.2,dark,12);
-  for(let i=0;i<12;i++){
-    const a=i/12*TAU,b=(i+1)/12*TAU;
-    mesh.beam([Math.cos(a)*5.5,33,Math.sin(a)*5.5],[Math.cos(a)*5.5,35,Math.sin(a)*5.5],.18,white);
-    mesh.beam([Math.cos(a)*5.5,35,Math.sin(a)*5.5],[Math.cos(b)*5.5,35,Math.sin(b)*5.5],.16,white);
-  }
-  for(let i=0;i<8;i++){const a=i/8*TAU;mesh.box(Math.cos(a)*3.4,36.5,Math.sin(a)*3.4,.28,6,.28,dark);}
   mesh.cone(0,39.5,0,5,0,4,coral,12);
-  mesh.cone(0,43.5,0,.2,0,3,dark,6);
   return mesh;
 }
 
@@ -207,7 +195,7 @@ export function createSeabedMesh() {
   for(let x=-700;x<900;x+=16)for(let z=-650;z<650;z+=16){
     const point=(dx,dz)=>[x+dx,seabedHeight(x+dx,z+dz),z+dz];
     const shade=.92+.08*Math.sin(x*.31+z*.24);
-    mesh.quad(point(0,0),point(0,16),point(16,16),point(16,0),[.72*shade,.68*shade,.43*shade]);
+    mesh.quad(point(0,0),point(0,16),point(16,16),point(16,0),[.7*shade,.7*shade,.4*shade]);
   }
   return mesh;
 }
@@ -220,7 +208,7 @@ export function createSeaGrassMesh() {
     for(let blade=0;blade<6;blade++){
       const angle=random()*TAU,h=1+random()*1.8,dx=Math.cos(angle),dz=Math.sin(angle);
       const base=[x+dx*.9,y,z+dz*.9],tip=[base[0]+dx*.8,y+h,base[2]+dz*.8];
-      mesh.triangle([base[0]-dz*.25,y,base[2]+dx*.25],tip,[base[0]+dz*.25,y,base[2]-dx*.25],[.13+random()*.1,.38+random()*.2,.23]);
+      mesh.triangle([base[0]-dz*.25,y,base[2]+dx*.25],tip,[base[0]+dz*.25,y,base[2]-dx*.25],[.1+random()*.1,.4+random()*.2,.2]);
     }
   }
   return mesh;
@@ -236,11 +224,14 @@ export function createFishMesh(time,player) {
       const floor=seabedHeight(x,z);if(floor> -5.5)continue;
       const y=Math.min(-3.8,waveHeight(x,z,time)-1.3,floor+2.2+Math.sin(time*1.1+fish)*.4),shape=new MeshBuilder();
       const color=rgb(['#ffd56b','#fa927a','#94dae0'][school%3]);
-      shape.sphere(0,0,0,.27,.35,.95,color,5,3);
+      for(const side of [-1,1])for(const vertical of [-1,1]) {
+        const flank=[side*.27,0,0],edge=[0,vertical*.35,0];
+        const [a,b]=side*vertical>0?[flank,edge]:[edge,flank];
+        shape.triangle([0,0,.95],a,b,color);
+        shape.triangle([0,0,-.95],b,a,color);
+      }
       const wag=Math.sin(time*8+fish+school)*.3;
       shape.triangle([0,0,-.7],[wag,.55,-1.5],[wag,-.55,-1.5],color);
-      shape.triangle([-.1,0,.2],[-.65,-.05,-.35],[0,0,-.4],color);
-      shape.triangle([.1,0,.2],[0,0,-.4],[.65,-.05,-.35],color);
       mesh.append(shape,modelMatrix(x,y,z,Math.atan2(Math.cos(angle)*9,-Math.sin(angle)*7)));
     }
   }

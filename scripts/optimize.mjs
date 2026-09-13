@@ -3,8 +3,13 @@ import { parse } from 'acorn';
 import { minify } from 'terser';
 import CleanCSS from 'clean-css';
 import { minify as minifyHTML } from 'html-minifier-terser';
+import { runInNewContext } from 'node:vm';
+import * as course from '../src/course.js';
+import {rainbowShader,skyGradientShader} from '../src/renderer.js';
+import {stripCourseDefaults,inlineWebGLConstants,encodeEnums} from './transforms.mjs';
+import {shaderNames as localShaderNames,renameShaderTokens,compactShaderNumbers} from './glsl.mjs';
 
-export const modules=['math','course','boat-physics','interactions','simulation','attract','mesh','atmosphere','renderer','audio','presentation','main'];
+export const modules=['math','course','boat-physics','interactions','racing-lines','simulation','attract','mesh','atmosphere','renderer','audio','presentation','main'];
 export async function readScripts(names=modules){
   return (await Promise.all(names.map(name=>readFile(`src/${name}.js`,'utf8')))).map(source=>source
     .replace(/^export const gameState = .*;$/gm,'')
@@ -17,7 +22,7 @@ function walk(node,visit){
 }
 export function stripMetadata(source){
   const ast=parse(source,{ecmaVersion:'latest'}),edits=[];
-  const unused=new Set(['name','slalom','offshore','buoy','sideSpray']);
+  const unused=new Set(['channel','slalom','offshore','buoy','sideSpray']);
   // Remove whole list entries, including their commas, without rewriting code
   // or accidentally treating a string/comment as an application field.
   const removeEntries=(entries,remove)=>{
@@ -38,23 +43,52 @@ export function stripMetadata(source){
     }
     if(node.type==='ObjectExpression')removeEntries(node.properties,p=>
       p.type==='Property'&&!p.computed&&unused.has(p.key.name??p.key.value));
-    if(node.type==='FunctionDeclaration'&&node.id.name==='buildCourse'){
-      if(node.params[1]?.name!=='name'||node.params[2]?.name!=='points')throw Error('Course metadata signature changed');
-      removeEntries(node.params,(_,i)=>i===1);
-    }
-    if(node.type==='CallExpression'&&node.callee.name==='buildCourse')removeEntries(node.arguments,(_,i)=>i===1);
+  });
+  for(const [start,end,text] of edits.sort((a,b)=>b[0]-a[0]))source=source.slice(0,start)+text+source.slice(end);
+  return source;
+}
+const shaderNames=['vertexSource','fragmentSource','skyVertex','skyFragment','flareFragment'];
+const compactGLSL=text=>text.replace(/\/\/[^\n]*(?:\n|$)/g,' ').replace(/\/\*[\s\S]*?\*\//g,' ')
+  .replace(/\s+/g,' ').replace(/\s*([{}()[\],;:*\/=<>?])\s*/g,'$1');
+export function precompileShaders(source){
+  source=source.replaceAll('${rainbowShader}',rainbowShader).replaceAll('${skyGradientShader}',skyGradientShader);
+  const edits=[];
+  walk(parse(source,{ecmaVersion:'latest'}),node=>{
+    if(node.type!=='VariableDeclarator'||!shaderNames.includes(node.id.name))return;
+    // Evaluate only the project's shader expressions, using the same course
+    // constants as development. No renderer or browser APIs run during build.
+    const shader=runInNewContext('('+source.slice(node.init.start,node.init.end)+')',{...course},{timeout:1000});
+    if(typeof shader!=='string')throw Error(`Invalid shader: ${node.id.name}`);
+    const compact=compactShaderNumbers(compactGLSL(shader));
+    edits.push([node.init.start,node.init.end,JSON.stringify(compact)]);
+  });
+  for(const [start,end,text] of edits.sort((a,b)=>b[0]-a[0]))source=source.slice(0,start)+text+source.slice(end);
+  return source;
+}
+export function shortenShaderLocals(source,frequency=false,{scoped=false,numbers=false}={}){
+  source=source.replaceAll('${rainbowShader}',rainbowShader).replaceAll('${skyGradientShader}',skyGradientShader);
+  const edits=[];
+  walk(parse(source,{ecmaVersion:'latest'}),node=>{
+    if(node.type!=='VariableDeclarator'||!shaderNames.includes(node.id.name))return;
+    const shader=runInNewContext('('+source.slice(node.init.start,node.init.end)+')',{...course},{timeout:1000});
+    const mapping=localShaderNames(shader,frequency,scoped);
+    const rename=text=>{const renamed=renameShaderTokens(text,mapping);return numbers?compactShaderNumbers(renamed):renamed;};
+    walk(node.init,part=>{
+      if(part.type==='TemplateElement')edits.push([part.start,part.end,rename(source.slice(part.start,part.end))]);
+      if(part.type==='Literal'&&typeof part.value==='string')edits.push([part.start,part.end,JSON.stringify(rename(part.value))]);
+    });
   });
   for(const [start,end,text] of edits.sort((a,b)=>b[0]-a[0]))source=source.slice(0,start)+text+source.slice(end);
   return source;
 }
 export function compactShaders(source){
+  source=source.replaceAll('${rainbowShader}',rainbowShader).replaceAll('${skyGradientShader}',skyGradientShader);
   const edits=[],ast=parse(source,{ecmaVersion:'latest'});
   walk(ast,node=>{
-    if(node.type!=='VariableDeclarator'||!['vertexSource','fragmentSource','skyVertex','skyFragment','flareFragment'].includes(node.id.name))return;
+    if(node.type!=='VariableDeclarator'||!shaderNames.includes(node.id.name))return;
     walk(node.init,part=>{
       if(part.type!=='TemplateElement')return;
-      const text=source.slice(part.start,part.end).replace(/\/\/[^\n]*(?:\n|$)/g,' ').replace(/\/\*[\s\S]*?\*\//g,' ')
-        .replace(/\s+/g,' ').replace(/\s*([{}()[\],;:*\/=<>?])\s*/g,'$1');
+      const text=compactGLSL(source.slice(part.start,part.end));
       edits.push([part.start,part.end,text]);
     });
   });
@@ -64,15 +98,47 @@ export function compactShaders(source){
   const map=new Map(names.map((name,i)=>[name,`q${i}`]));
   return source.replace(/\b[uva][A-Z]\w*/g,name=>map.get(name));
 }
-// Only application-owned, statically accessed properties. Physics fields used
-// through computed names (e.g. `${axis}Rate`) and all browser APIs stay intact.
-const privateProperties=`activeGates cameraReady cameraYaw cameraPace crafts drawMesh drawLensFlare effectBuffer engineGain fishBuffer flareProgram gateMeshes gullRacer hideCourseMarkers lighthouse lightingReady makeProgram makeWater nextGull nightBlend particleClock rainbowColors riderBuffer rivalEngines seagullBuffer shadowStyle shadowUniforms skyBuffer skyProgram splashNoise sunScreen sunTexture surfFilter surfGain surfPan syncCourse updateEffects wakeUniforms waterGain speedLevel nextGate finishTime freePlay impactCooldown splashCooldown waterImpact worldTime finishOrder aiSkill contactFraction handlebar`.split(' ');
-export async function compactScript(source,{properties=true,shaders=true,metadata=true}={}){
+// Explicit application fields only: DOM, WebGL, Web Audio, and dataset keys
+// retain their public names. Dynamic physics keys are annotated together below.
+const dynamicProperties=`yaw pitch roll speed handlePitch pitchRate rollRate handlePitchRate anchorX anchorZ leanX leanZ tiltVX tiltVZ`.split(' ');
+const privateProperties=[...new Set((`fullscreen taperedBox activeGates cameraReady cameraYaw cameraPace crafts drawMesh drawDynamic drawLensFlare effectBuffer engineGain engineVoice envelope fishBuffer flareProgram gateMeshes gullRacer hideCourseMarkers lighthouse lightingReady makeProgram makeWater nextGull nightBlend particleClock rainbowColors riderBuffer rivalEngines seagullBuffer shadowStyle shadowUniforms skyBuffer skyProgram splashNoise sunScreen sunTexture surfFilter surfGain surfPan syncCourse updateEffects wakeUniforms waterGain speedLevel nextGate finishTime freePlay impactCooldown splashCooldown waterImpact worldTime course aiSkill contactFraction handlebar racers wakes rider gates buoys passed misses lap attract wakeClock countdown tangent samples bounds progressCenter aiSkill
+steep reef lampHeight sunDirection twilight altitude lighting lightingCourse
+particles loc attr crafts island rainbow beacon lamp seabed seagrass
+triangle quad box cone sphere beam upload tone splash seagull unlock
+hipOffset shoulderOffset hip shoulder knee elbow foot hand hips chest torsoMatrix grips ends limbs pivot
+maxX minX maxZ minZ airborne yawRate steer throttle brake amplitude contactFraction
+`).trim().split(/\s+/).concat(dynamicProperties))];
+export function markPropertyKeys(source){
+  const edits=new Set(),keys=new Set(dynamicProperties),ast=parse(source,{ecmaVersion:'latest'});
+  const mark=node=>{
+    if(node.type==='Literal'&&keys.has(node.value))edits.add(node.start);
+  };
+  walk(ast,node=>{
+    // Interpolation field lists, buoy solver tuples, and axis/rate pairs.
+    if(node.type==='ArrayExpression')for(const item of node.elements)if(item)mark(item);
+    // The rider chooses different spring limits for roll and pitch.
+    if(node.type==='BinaryExpression'&&node.left.name==='axis')mark(node.right);
+    // Concatenating a shortened key cannot produce another shortened key.
+    // Require explicit axis/rate pairs if future physics adds another loop.
+    if((node.type==='TemplateLiteral'&&node.quasis.some(q=>q.value.raw==='Rate'))||
+      (node.type==='BinaryExpression'&&node.operator==='+'&&node.right.value==='Rate'))
+      throw Error('Computed physics rate needs an explicit property pair');
+  });
+  for(const start of [...edits].sort((a,b)=>b-a))source=source.slice(0,start)+'/*@__KEY__*/'+source.slice(start);
+  return source;
+}
+export async function compactScript(source,{properties=true,shaders=true,metadata=true,baked=false,locals=false,webgl=false,enums=false,defaults=true,inline=3,frequency=false,scoped=false,numbers=false}={}){
   source=source.replace(/\bconst DEVELOPMENT = true;/,'const DEVELOPMENT = false;');
+  if(defaults)source=stripCourseDefaults(source);
+  if(locals)source=shortenShaderLocals(source,frequency,{scoped,numbers});
+  if(baked)source=precompileShaders(source);
+  if(webgl)source=inlineWebGLConstants(source);
+  if(enums)source=encodeEnums(source);
   if(metadata)source=stripMetadata(source);
+  if(properties)source=markPropertyKeys(source);
   const result=await minify(shaders?compactShaders(source):source,{
     ecma:2020,toplevel:true,
-    compress:{passes:3,global_defs:{DEVELOPMENT:false}},
+    compress:{passes:3,inline,global_defs:{DEVELOPMENT:false}},
     mangle:{properties:properties?{regex:new RegExp(`^(?:${privateProperties.join('|')})$`)}:false},
     format:{comments:false,inline_script:true}
   });

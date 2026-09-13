@@ -22,12 +22,11 @@ test('hull, rider, buoy and water time share an interpolated instant without mut
   Object.assign(r,{x:0,y:1,yaw:Math.PI-.1});r.rider.x=0;r.rider.roll=.1;race.worldTime=2;race.buoys[0].leanX=0;
   display.capture(race);
   Object.assign(r,{x:2,y:3,yaw:-Math.PI+.1});r.rider.x=.4;r.rider.roll=.3;race.worldTime=2+1/60;race.buoys[0].leanX=.2;
-  r.rider.handlePitch=.24;r.rider.handleYaw=.2;
+  r.rider.handlePitch=.24;
   const snapshot=JSON.stringify(race),view=display.sample(race,.5);
   assert.equal(view.racers[0].x,1);assert.equal(view.racers[0].y,2);assert.equal(view.racers[0].yaw,Math.PI);
   assert.equal(view.racers[0].rider.x,.2);assert.ok(Math.abs(view.racers[0].rider.roll-.2)<1e-12);
   assert.ok(Math.abs(view.racers[0].rider.handlePitch-.12)<1e-12);
-  assert.ok(Math.abs(view.racers[0].rider.handleYaw-.1)<1e-12);
   assert.equal(view.buoys[0].leanX,.1);assert.ok(Math.abs(view.worldTime-(2+1/120))<1e-12);
   assert.equal(JSON.stringify(race),snapshot);
 });

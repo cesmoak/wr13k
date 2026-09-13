@@ -9,7 +9,7 @@ export const OPPONENT_PACE = 1.15;
 export const RIDER_LEAN = .24;
 // Every rider earns the same 8% per clean checkpoint, up to level five.
 export function speedMultiplier(racer) {
-  const earned=1 + .08 * (clamp(racer.speedLevel || 1, 1, MAX_SPEED_LEVEL) - 1);
+  const earned=1 + .08 * (clamp(DEVELOPMENT?(racer.speedLevel||1):racer.speedLevel, 1, MAX_SPEED_LEVEL) - 1);
   return earned*(racer.id===0?1:OPPONENT_PACE);
 }
 // Stronger downward acceleration shortens wave launches without an airtime cap.
@@ -18,16 +18,16 @@ const HULL_SPRING = 110;
 const HULL_DAMPING = 16;
 
 export function newBoatState() {
-  return { yawRate: 0, pitchRate: 0, rollRate: 0, contactFraction: 1,
+  return { yawRate: 0, pitchRate: 0, rollRate: 0,
     waterImpact: 0, splashCooldown: 0,
-    ...(DEVELOPMENT ? {waterForce: 0, landingImpact: 0, contactPoints: []} : {}),
-    rider: { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, pitch: 0, roll: 0, pitchRate: 0, rollRate: 0,
-      handlePitch:0,handlePitchRate:0,handleYaw:0,handleYawRate:0 }, wakeClock: 0 };
+    ...(DEVELOPMENT ? {contactFraction:1,waterForce: 0, landingImpact: 0, contactPoints: []} : {}),
+    rider: { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, pitch: 0, pitchRate: 0, ...(DEVELOPMENT?{roll:0,rollRate:0}:{}),
+      handlePitch:0,handlePitchRate:0 } };
 }
 
-export function resetBoat(racer, time, wakes = []) {
+export function resetBoat(racer, time) {
   Object.assign(racer, newBoatState(), { pitch: 0, roll: 0, vy: 0, airborne: false, steer: 0 });
-  racer.y = waveHeight(racer.x, racer.z, time, wakes) + .48 - GRAVITY / HULL_SPRING;
+  racer.y = waveHeight(racer.x, racer.z, time) + .48 - GRAVITY / HULL_SPRING;
 }
 
 // Assisted pivoting at rest, strongest response once moving, wider high-speed arcs.
@@ -57,33 +57,25 @@ export function springRider(r, ax, ay, az, dt) {
     const constrained = clamp(rider[axis], ...limits[i]);
     if (constrained !== rider[axis]) { rider[axis] = constrained; rider[velocity] = 0; }
   });
-  for (const [axis, acceleration] of [['roll', sideAccel], ['pitch', forwardAccel]]) {
-    // Positive roll tilts away from local +X, so cornering lean uses the opposite sign.
-    const steeringLean=-r.steer*(.035+.11*clamp(r.speed/35,0,1))*(r.airborne?.25:1);
-    const rate = `${axis}Rate`,target=axis==='roll'?clamp(steeringLean-acceleration*.0045,-.32,.32):clamp(acceleration*.0025,-.12,.12);
-    // A small hull-rate disturbance makes impacts visible without locking the
-    // upper body to the ski. Balance recovers with a damped angular spring.
-    rider[rate] += ((target - rider[axis]) * 55 - rider[rate] * 12 + r[rate] * 1.8) * dt;
-    rider[axis] += rider[rate] * dt;
-    const limit=axis==='roll'?.38:.24;
-    if (Math.abs(rider[axis]) > limit) {
-      rider[axis] = clamp(rider[axis], -limit, limit); rider[rate] = 0;
-    }
+  // Turns and side impacts shift the body laterally without tipping it.
+  // Keep the roll fields for interpolation/reset compatibility.
+  if(DEVELOPMENT)rider.roll = rider.rollRate = 0;
+  const target = clamp(forwardAccel * .0025, -.12, .12);
+  rider.pitchRate += ((target - rider.pitch) * 55 - rider.pitchRate * 12 + r.pitchRate * 1.8) * dt;
+  rider.pitch += rider.pitchRate * dt;
+  if (Math.abs(rider.pitch) > .24) {
+    rider.pitch = clamp(rider.pitch, -.24, .24); rider.pitchRate = 0;
   }
   // A hinged steering pole follows the rider's suspension with damped travel.
-  // Steering twists the crossbar independently; mechanical stops bound both.
-  for(const [axis,target,low,high] of [
-    ['handlePitch',clamp(rider.y*(rider.y>0?1.7:.3),-.12,.24),-.12,.24],
-    ['handleYaw',r.steer*.25,-.25,.25]
-  ]){
-    const rate=axis+'Rate';
-    rider[rate]+=((target-rider[axis])*90-rider[rate]*17)*dt;
-    rider[axis]+=rider[rate]*dt;
-    if(rider[axis]<low||rider[axis]>high){rider[axis]=clamp(rider[axis],low,high);rider[rate]=0;}
+  const handleTarget=clamp(rider.y*(rider.y>0?1.7:.3),-.12,.24);
+  rider.handlePitchRate+=((handleTarget-rider.handlePitch)*90-rider.handlePitchRate*17)*dt;
+  rider.handlePitch+=rider.handlePitchRate*dt;
+  if(rider.handlePitch<-.12||rider.handlePitch>.24){
+    rider.handlePitch=clamp(rider.handlePitch,-.12,.24);rider.handlePitchRate=0;
   }
 }
 
-export function stepBoat(r, input, dt, time, wakes = [], water = sampleWater, moored = false) {
+export function stepBoat(r, input, dt, time, water = sampleWater, moored = false) {
   const steps = Math.max(1, Math.ceil(dt / (1 / 240))), h = dt / steps;
   if(DEVELOPMENT)r.landingImpact = Math.max(0, r.landingImpact - dt * 12);
   r.waterImpact = 0;
@@ -97,7 +89,7 @@ export function stepBoat(r, input, dt, time, wakes = [], water = sampleWater, mo
       const rx = matrix[0] * x + matrix[4] * y + matrix[8] * z;
       const ry = matrix[1] * x + matrix[5] * y + matrix[9] * z;
       const rz = matrix[2] * x + matrix[6] * y + matrix[10] * z;
-      const surface = water(r.x + rx, r.z + rz, now, wakes);
+      const surface = water(r.x + rx, r.z + rz, now);
       const depth = surface.height - (r.y + ry);
       let force = 0;
       if (depth > 0) {
@@ -125,14 +117,14 @@ export function stepBoat(r, input, dt, time, wakes = [], water = sampleWater, mo
       }
       if(DEVELOPMENT)contacts.push({ x: r.x + rx, y: r.y + ry, z: r.z + rz, depth, force });
     }
-    r.contactFraction = wet / HULL_CONTACTS.length;
+    const contact = wet / HULL_CONTACTS.length;
+    if(DEVELOPMENT)r.contactFraction=contact;
     if(DEVELOPMENT)r.waterForce = fy + GRAVITY;
     if(DEVELOPMENT)r.contactPoints = contacts;
     r.airborne = wet === 0;
-    const contact = r.contactFraction;
     // Bleed off fast upward rebound while the hull is still in the water.
     // Gentle bobbing and free-flight gravity remain unaffected.
-    fy -= contact * Math.max(0, r.vy - 4) * 8;
+    fy -= contact * Math.max(0, r.vy - 3) * 12;
     const throttle = clamp(input.throttle || 0, 0, 1);
     const steer = clamp(input.steer || 0, -1, 1);
     r.steer += (steer - r.steer) * (1 - Math.exp(-12 * h));
@@ -153,15 +145,18 @@ export function stepBoat(r, input, dt, time, wakes = [], water = sampleWater, mo
     }
     // Rider weight feeds back into the hull. Small active banking/trim torques
     // are arcade assists; the final angles still come from spring forces.
-    rollTorque -= r.rider.x * 4 + r.steer * clamp(r.speed / 30, 0, 1) * 6 * contact;
+    // Build a deeper bank with steering, then taper before the hull tips onto
+    // its side. Water contact becomes nonlinear as the inside rail lifts.
+    const bankGain = (10 + 20 * Math.abs(r.steer)) * clamp((.54 + r.roll * Math.sign(r.steer)) / .12, 0, 1);
+    rollTorque -= r.rider.x * 4 + r.steer * clamp(r.speed / 30, 0, 1) * bankGain * contact;
     pitchTorque += r.rider.z * 4 - thrust * .025;
     r.pitchRate += (pitchTorque / 1.8 - r.pitchRate * 3.5) * h;
     r.rollRate += (rollTorque / .65 - r.rollRate * 4) * h;
     r.pitch += r.pitchRate * h; r.roll += r.rollRate * h;
     // Soft assisted recovery limits prevent capsizing in this first arcade pass.
-    for (const axis of ['pitch', 'roll']) {
+    for (const [axis,rate] of [['pitch','pitchRate'],['roll','rollRate']]) {
       const bound = axis === 'pitch' ? .75 : .85;
-      if (Math.abs(r[axis]) > bound) { r[axis] = clamp(r[axis], -bound, bound); r[`${axis}Rate`] *= .3; }
+      if (Math.abs(r[axis]) > bound) { r[axis] = clamp(r[axis], -bound, bound); r[rate] *= .3; }
     }
     r.vy += fy * h; r.y += r.vy * h;
     if (!moored) {
@@ -176,22 +171,21 @@ export function stepBoat(r, input, dt, time, wakes = [], water = sampleWater, mo
 }
 
 // Two-link constraints keep hands on the handlebar and feet on the deck.
-export function solveJoint(a, b, upper, lower, bend) {
-  const delta = b.map((v, i) => v - a[i]), distance = Math.hypot(...delta) || .001;
-  const axis = delta.map(v => v / distance), length = clamp(distance, Math.abs(upper - lower) + .001, upper + lower - .001);
-  const along = (upper * upper - lower * lower + length * length) / (2 * length);
+export function solveJoint(a, b, bend) {
+  const delta = b.map((v, i) => v - a[i]), distance = Math.hypot(...delta);
+  const axis = distance ? delta.map(v => v / distance) : [0,0,1], along = clamp(distance,.001,1.099)/2;
   const projection = bend.reduce((sum, v, i) => sum + v * axis[i], 0);
   let normal = bend.map((v, i) => v - projection * axis[i]);
   let n = Math.hypot(...normal);
   if (n < .001) { normal = Math.abs(axis[0]) < .9 ? [0, axis[2], -axis[1]] : [-axis[2], 0, axis[0]]; n = Math.hypot(...normal); }
-  const offset = Math.sqrt(Math.max(0, upper * upper - along * along));
+  const offset = Math.sqrt(Math.max(0, .55 * .55 - along * along));
   return a.map((v, i) => v + axis[i] * along + normal[i] / n * offset);
 }
 
 export function handlebarPose(r){
-  const pitch=r.rider.handlePitch||0,yaw=r.rider.handleYaw||0;
+  const pitch=DEVELOPMENT?(r.rider.handlePitch||0):r.rider.handlePitch;
   const pivot=[0,.85,1.55],center=[0,.85+.5*Math.cos(pitch)+1.05*Math.sin(pitch),1.55+.5*Math.sin(pitch)-1.05*Math.cos(pitch)];
-  const point=side=>[side*Math.cos(yaw),center[1],center[2]-side*Math.sin(yaw)];
+  const point=side=>[side,center[1],center[2]];
   return {pivot,center,grips:[point(-.7),point(.7)],ends:[point(-.85),point(.85)]};
 }
 
@@ -199,7 +193,7 @@ export function riderPose(r) {
   const p = r.rider;
   const hull = modelMatrix(0, 0, 0, r.yaw, r.pitch, r.roll);
   const extension=Math.max(0,p.y);
-  const upright = modelMatrix(0, 0, 0, r.yaw, p.pitch + RIDER_LEAN + extension*.35, p.roll);
+  const upright = modelMatrix(0, 0, 0, r.yaw, p.pitch + RIDER_LEAN + extension*.35, 0);
   const torsoMatrix = modelMatrix();
   // inverse(hull rotation) * balanced world orientation. Unlike subtracting
   // Euler angles this stays upright under simultaneous pitch, roll, and yaw.
@@ -211,7 +205,7 @@ export function riderPose(r) {
   const forward = Array.from(torsoMatrix.slice(8, 11));
   // Follow an upward/forward standing arc so the fixed grips do not pin the
   // pelvis down when the knees straighten. Crouching still moves down freely.
-  const hips = [p.x * .65, 1.48 + p.y, -.48 + p.z * .65 + extension*1.5];
+  const hips = [p.x, 1.48 + p.y, -.48 + p.z * .65 + extension*1.5];
   const chestOffset = up.map((v, i) => v * .55 + forward[i] * .04);
   const handlebar=handlebarPose(r);
   const limbs = [-1, 1].map((side,i) => ({
@@ -238,8 +232,8 @@ export function riderPose(r) {
   for (const limb of limbs) {
     limb.hip = hips.map((v, i) => v + limb.hipOffset[i]);
     limb.shoulder = hips.map((v, i) => v + limb.shoulderOffset[i]);
-    limb.knee = solveJoint(limb.hip, limb.foot, .55, .55, [0, -.15, 1]);
-    limb.elbow = solveJoint(limb.shoulder, limb.hand, .55, .53, [Math.sign(limb.hand[0]), -.15, -.6]);
+    limb.knee = solveJoint(limb.hip, limb.foot, [0, -.15, 1]);
+    limb.elbow = solveJoint(limb.shoulder, limb.hand, [Math.sign(limb.hand[0]), -.15, -.6]);
   }
   for (let i = 0; i < 3; i++) torsoMatrix[12 + i] = chest[i] - up[i] * .12;
   return { hips, chest, limbs, torsoMatrix, handlebar };

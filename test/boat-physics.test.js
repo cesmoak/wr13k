@@ -1,16 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRacer, createRace, stepRace, aiInput, startRace } from '../src/simulation.js';
-import { stepBoat, steeringAuthority, resetBoat, riderPose, springRider, HULL_CONTACTS, RIDER_LEAN, handlebarPose } from '../src/boat-physics.js';
+import { stepBoat, steeringAuthority, resetBoat, riderPose, springRider, HULL_CONTACTS, RIDER_LEAN, handlebarPose, solveJoint } from '../src/boat-physics.js';
 import { modelMatrix, multiply } from '../src/math.js';
-import { waveHeight, sampleWater, MAX_WAKES } from '../src/course.js';
+import { waveHeight, sampleWater } from '../src/course.js';
 
 const flatWater = () => ({height:0,nx:0,ny:1,nz:0,velocity:0});
 function boat() {
   return Object.assign(createRacer(0), {x:0,z:0,y:.35,yaw:0,vx:0,vy:0,vz:0,speed:0});
 }
 function run(r, seconds, input = {}, water = flatWater, dt = 1/60) {
-  for(let i=0;i<Math.round(seconds/dt);i++)stepBoat(r,input,dt,(i+1)*dt,[],water);
+  for(let i=0;i<Math.round(seconds/dt);i++)stepBoat(r,input,dt,(i+1)*dt,water);
   return r;
 }
 const separation = (a,b) => Math.hypot(...a.map((v,i)=>v-b[i]));
@@ -28,8 +28,23 @@ test('player idle steering is tripled without forward thrust or changing cruisin
   assert.ok(steeringAuthority(25)>steeringAuthority(5));
   assert.ok(steeringAuthority(68)<steeringAuthority(25));
 });
+test('normal turns bank the hull visibly in both directions while the torso stays upright',()=>{
+  for(const steer of [-1,-.5,.5,1]){
+    const r=run(boat(),3,{throttle:1});
+    run(r,3,{throttle:1,steer});
+    const bank=-r.roll*Math.sign(steer)*180/Math.PI;
+    assert.ok(Math.abs(steer)===1?bank>25&&bank<28:bank>12&&bank<14,`Turn ${steer}: ${bank} degrees`);
+    const world=multiply(modelMatrix(0,0,0,r.yaw,r.pitch,r.roll),riderPose(r).torsoMatrix);
+    assert.ok(Math.abs(world[1])<1e-6,'Shoulders remain level above the banked hull');
+    assert.equal(r.airborne,false);
+    run(r,3,{throttle:1});
+    assert.ok(Math.abs(r.roll)<.001,'Hull levels smoothly after releasing steering');
+  }
+  const idle=run(boat(),3,{steer:1});
+  assert.ok(Math.abs(idle.roll)<.001,'Idle pivot does not acquire a cruising bank');
+});
 test('flat-water buoyancy settles without snapping or persistent oscillation',()=>{
-  const r=boat();r.y=1.5;stepBoat(r,{},1/60,1/60,[],flatWater);
+  const r=boat();r.y=1.5;stepBoat(r,{},1/60,1/60,flatWater);
   assert.ok(r.y>1.45,'A falling hull must not teleport to the surface');
   run(r,8);assert.ok(r.y>.25&&r.y<.32);assert.ok(Math.abs(r.vy)<.01);
   assert.ok(Math.abs(r.pitch)<.03&&Math.abs(r.roll)<.03);
@@ -38,7 +53,7 @@ test('flat-water buoyancy settles without snapping or persistent oscillation',()
 });
 test('separate contacts pitch and roll the hull along a sloping surface',()=>{
   const water=(x,z)=>({height:.12*x+.09*z,nx:-.12/Math.hypot(.12,1,.09),ny:1/Math.hypot(.12,1,.09),nz:-.09/Math.hypot(.12,1,.09),velocity:0});
-  const r=boat();for(let i=0;i<480;i++)stepBoat(r,{},1/60,(i+1)/60,[],water,true);
+  const r=boat();for(let i=0;i<480;i++)stepBoat(r,{},1/60,(i+1)/60,water,true);
   assert.ok(r.roll>.06);assert.ok(r.pitch<-.04);
   assert.ok(r.contactPoints.some(p=>p.force>0));
 });
@@ -52,7 +67,7 @@ test('a wave-like launch has a short arc and returns promptly to the water',()=>
   const r=boat();Object.assign(r,{y:2,vy:8,airborne:true});
   let apex=r.y,landingTime=null;
   for(let i=0;i<360;i++){
-    stepBoat(r,{},1/240,(i+1)/240,[],flatWater);apex=Math.max(apex,r.y);
+    stepBoat(r,{},1/240,(i+1)/240,flatWater);apex=Math.max(apex,r.y);
     if(!r.airborne){landingTime=(i+1)/240;break;}
   }
   assert.ok(apex-2>1.2&&apex-2<1.6,'Keep a small ballistic hop rather than a floating launch');
@@ -63,7 +78,7 @@ test('landing transmits an impact into the independently sprung rider',()=>{
   const r=boat();Object.assign(r,{y:2,vy:-5,airborne:true});
   let impact=0,compression=0;
   for(let i=0;i<180;i++){
-    stepBoat(r,{},1/60,(i+1)/60,[],flatWater);
+    stepBoat(r,{},1/60,(i+1)/60,flatWater);
     impact=Math.max(impact,r.landingImpact);compression=Math.min(compression,r.rider.y);
   }
   assert.ok(impact>3);assert.ok(compression<-.03);
@@ -76,29 +91,24 @@ test('rider inertia, anchored limbs, and rider weight affect the hull',()=>{
     assert.ok(Math.abs(separation(limb.hip,limb.knee)-.55)<.005);
     assert.ok(Math.abs(separation(limb.knee,limb.foot)-.55)<.005);
     assert.ok(Math.abs(separation(limb.shoulder,limb.elbow)-.55)<.005);
-    assert.ok(Math.abs(separation(limb.elbow,limb.hand)-.53)<.005);
+    assert.ok(Math.abs(separation(limb.elbow,limb.hand)-.55)<.005);
     assert.equal(limb.foot[1],.64);assert.deepEqual(limb.hand,handlebarPose(r).grips[limb.hand[0]<0?0:1]);
   }
   const centered=boat(),leaning=boat();leaning.rider.x=.4;
-  stepBoat(centered,{},1/60,1/60,[],flatWater);stepBoat(leaning,{},1/60,1/60,[],flatWater);
+  stepBoat(centered,{},1/60,1/60,flatWater);stepBoat(leaning,{},1/60,1/60,flatWater);
   assert.ok(leaning.rollRate<centered.rollRate);
 });
-test('generated wakes travel, expire, and change the sampled water forces',()=>{
+test('visual wakes do not alter water forces',()=>{
   const wakes=[{x:0,z:0,time:0,amplitude:.3}],t=.7;
-  assert.ok(Math.abs(waveHeight(6,0,t,wakes)-waveHeight(6,0,t))>.02);
-  assert.notEqual(sampleWater(6,0,t,wakes).velocity,sampleWater(6,0,t).velocity);
-  assert.equal(waveHeight(6,0,3,wakes),waveHeight(6,0,3));
-  const race=createRace();startRace(race);
-  for(let i=0;i<1200;i++)stepRace(race,aiInput(race.racers[0],race),1/60);
-  assert.ok(race.wakes.length>0&&race.wakes.length<=MAX_WAKES);
-  assert.ok(race.wakes.every(w=>race.worldTime-w.time<2.8));
+  assert.equal(waveHeight(6,0,t,wakes),waveHeight(6,0,t));
+  assert.deepEqual(sampleWater(6,0,t,wakes),sampleWater(6,0,t));
 });
 test('extreme rider motion cannot stretch the arms off their handlebar anchors',()=>{
   const r=boat();Object.assign(r.rider,{x:.48,y:.16,z:-.27,vx:8,vy:4,vz:-8});
-  stepBoat(r,{},1/60,1/60,[],flatWater);
+  stepBoat(r,{},1/60,1/60,flatWater);
   for(const limb of riderPose(r).limbs){
     assert.ok(Math.abs(separation(limb.shoulder,limb.elbow)-.55)<.005);
-    assert.ok(Math.abs(separation(limb.elbow,limb.hand)-.53)<.005);
+    assert.ok(Math.abs(separation(limb.elbow,limb.hand)-.55)<.005);
   }
 });
 test('substeps stay consistent across frame rates and boat reset clears spring energy',()=>{
@@ -117,7 +127,7 @@ test('cruising acceleration and moderated U-turns remain responsive on flat wate
   Object.assign(r,{x:0,z:0,yaw:0,speed:50,vx:0,vz:50,steer:0});
   let time=0,footprint=0;
   while(r.yaw<Math.PI&&time<4){
-    stepBoat(r,{throttle:1,steer:1},1/60,time,[],flatWater);time+=1/60;
+    stepBoat(r,{throttle:1,steer:1},1/60,time,flatWater);time+=1/60;
     footprint=Math.max(footprint,Math.hypot(r.x,r.z));
   }
   assert.ok(time>2&&time<3,`U-turn time: ${time}`);
@@ -142,7 +152,7 @@ test('a real launch lifts the posed torso and extends the legs, then landing com
   const r=boat();r.y=2;r.vy=5;
   const standing=riderPose(r);let high=0,low=Infinity,longest=0,shortest=Infinity;
   for(let i=0;i<300;i++){
-    stepBoat(r,{},1/240,(i+1)/240,[],flatWater);
+    stepBoat(r,{},1/240,(i+1)/240,flatWater);
     const p=riderPose(r),l=p.limbs[0],reach=separation(l.hip,l.foot);
     if(r.airborne){high=Math.max(high,p.chest[1]);longest=Math.max(longest,reach);}
     else{low=Math.min(low,p.chest[1]);shortest=Math.min(shortest,reach);}
@@ -155,17 +165,22 @@ test('a real launch lifts the posed torso and extends the legs, then landing com
   assert.ok(low<standing.chest[1]-.2,'Landing sinks the torso into a crouch');
   assert.ok(longest>.98&&shortest<.7,'Knees straighten in flight and fold on impact');
 });
-test('steering pole lifts and twists within its stops while hands follow the grips',()=>{
-  const r=boat(),initial=handlebarPose(r);r.airborne=true;r.steer=1;
-  for(let i=0;i<240;i++)springRider(r,0,-22,0,1/240);
-  const lifted=handlebarPose(r);
-  assert.ok(lifted.center[1]>initial.center[1]+.2);
-  assert.ok(r.rider.handlePitch<=.24&&r.rider.handlePitch>0);
-  assert.ok(r.rider.handleYaw<=.25&&r.rider.handleYaw>.2);
-  assert.ok(Math.abs(separation(lifted.pivot,lifted.center)-separation(initial.pivot,initial.center))<1e-6);
-  for(const [i,l] of riderPose(r).limbs.entries())assert.deepEqual(l.hand,lifted.grips[i]);
-  resetBoat(r,0);
-  for(const key of ['handlePitch','handlePitchRate','handleYaw','handleYawRate'])assert.equal(r.rider[key],0);
+test('steering pole lifts without yaw while hands follow the fixed crossbar',()=>{
+  for(const steer of [-1,0,1]){
+    const r=boat(),initial=handlebarPose(r);r.airborne=true;r.steer=steer;
+    for(let i=0;i<240;i++)springRider(r,0,-22,0,1/240);
+    const lifted=handlebarPose(r);
+    assert.ok(lifted.center[1]>initial.center[1]+.2);
+    assert.ok(r.rider.handlePitch<=.24&&r.rider.handlePitch>0);
+    assert.deepEqual(lifted.grips.map(p=>p[0]),[-.7,.7]);
+    assert.deepEqual(lifted.ends.map(p=>p[0]),[-.85,.85]);
+    for(const p of [...lifted.grips,...lifted.ends])assert.deepEqual(p.slice(1),lifted.center.slice(1));
+    assert.ok(Math.abs(separation(lifted.pivot,lifted.center)-separation(initial.pivot,initial.center))<1e-6);
+    for(const [i,l] of riderPose(r).limbs.entries())assert.deepEqual(l.hand,lifted.grips[i]);
+    resetBoat(r,0);
+    for(const key of ['handlePitch','handlePitchRate'])assert.equal(r.rider[key],0);
+    assert.ok(!('handleYaw' in r.rider)&&!('handleYawRate' in r.rider));
+  }
 });
 test('neutral rider has a hip hinge, raised elbows, and knees above planted boots',()=>{
   const pose=riderPose(boat());
@@ -176,60 +191,87 @@ test('neutral rider has a hip hinge, raised elbows, and knees above planted boot
     assert.ok(l.elbow[1]>l.hand[1]+.15&&l.elbow[1]<l.shoulder[1],'Relaxed arms slope toward the grips');
   }
 });
-test('upper body preserves its forward riding lean across hull rotations and heading',()=>{
+test('upper body keeps zero sideways tilt across hull rotations, heading, and stale roll state',()=>{
   const r=boat();
   for(const yaw of [-2.7,0,1.4])for(const pitch of [-.75,0,.75])for(const roll of [-.85,0,.85]){
     Object.assign(r,{yaw,pitch,roll});
+    Object.assign(r.rider,{pitch:.08,roll:.38});
     const world=multiply(modelMatrix(0,0,0,yaw,pitch,roll),riderPose(r).torsoMatrix);
-    const expected=modelMatrix(0,0,0,yaw,RIDER_LEAN,0);
+    const expected=modelMatrix(0,0,0,yaw,RIDER_LEAN+.08,0);
     for(const i of [0,1,2,4,5,6,8,9,10])assert.ok(Math.abs(world[i]-expected[i])<1e-6,'Resting lean stays independent of hull tilt');
   }
 });
-test('balanced torso reacts smoothly to acceleration and hull impacts, then recovers',()=>{
-  const r=boat();r.roll=.7;r.rollRate=3;
-  springRider(r,50,0,0,1/240);
-  assert.ok(r.rider.roll<0&&r.rider.roll>-.01,'Angular spring does not snap to its goal');
-  for(let i=0;i<120;i++)springRider(r,50,0,0,1/240);
-  assert.ok(r.rider.roll<-.08&&r.rider.roll>-.38,'Limited balance wobble under load');
-  r.rollRate=0;
+test('side impacts cannot tilt the torso while pitch still reacts smoothly and recovers',()=>{
+  const r=boat();Object.assign(r,{roll:.7,rollRate:3,pitchRate:3});
+  Object.assign(r.rider,{roll:.2,rollRate:2});
+  springRider(r,50,0,30,1/240);
+  assert.equal(r.rider.roll,0);assert.equal(r.rider.rollRate,0);
+  assert.ok(r.rider.pitch>0&&r.rider.pitch<.01,'Pitch spring does not snap to its goal');
+  for(let i=0;i<120;i++)springRider(r,50,0,30,1/240);
+  assert.ok(r.rider.pitch>.08&&r.rider.pitch<.24);
+  assert.equal(r.rider.roll,0);assert.equal(r.rider.rollRate,0);
+  r.pitchRate=0;
   for(let i=0;i<720;i++)springRider(r,0,0,0,1/240);
-  assert.ok(Math.abs(r.rider.roll)<.001&&Math.abs(r.rider.rollRate)<.001);
-  assert.equal(r.roll,.7,'Torso settles upright even while the hull remains banked');
+  assert.ok(Math.abs(r.rider.pitch)<.001&&Math.abs(r.rider.pitchRate)<.001);
+  const world=multiply(modelMatrix(0,0,0,r.yaw,r.pitch,r.roll),riderPose(r).torsoMatrix);
+  assert.ok(Math.abs(world[1])<1e-6,'Shoulders remain level despite sustained hull roll rate');
   const race=createRace(),p=race.racers[0];
   Object.assign(p.rider,{pitch:.2,roll:-.2,pitchRate:2,rollRate:-3});resetBoat(p,race.worldTime);
   for(const key of ['pitch','roll','pitchRate','rollRate'])assert.equal(p.rider[key],0);
 });
-test('rider leans into both turns, with a small slow-speed cue and stronger loaded corners',()=>{
+test('rider shifts inward through both turns without sideways tilt and smoothly recenters',()=>{
   const settled=(speed,steer,accel)=>{
     const r=boat();r.yaw=0;r.speed=speed;r.steer=steer;
     for(let i=0;i<720;i++)springRider(r,accel,0,0,1/240);
     return r;
   };
   const slow=settled(2,1,0),fast=settled(40,1,25),other=settled(40,-1,-25);
-  assert.ok(slow.rider.roll<-.025&&slow.rider.roll>-.06);
-  assert.ok(fast.rider.roll<-.2&&fast.rider.roll>-.38);
-  assert.ok(Math.abs(fast.rider.roll+other.rider.roll)<1e-9,'Left and right response is symmetric');
+  assert.ok(slow.rider.x>0&&fast.rider.x>slow.rider.x);
+  assert.ok(Math.abs(fast.rider.x+other.rider.x)<1e-9,'Left and right springs are symmetric');
   for(const r of [fast,other]){
     const p=riderPose(r),world=multiply(modelMatrix(0,0,0,r.yaw,r.pitch,r.roll),p.torsoMatrix);
-    assert.ok(world[4]*r.steer>0,'Torso leans toward the turning side');
-    assert.equal(p.limbs[1].foot[0]-p.limbs[0].foot[0],.86,'Boots use the narrower stance');
-    r.steer=0;
+    assert.ok(p.hips[0]*r.steer>.1&&p.chest[0]*r.steer>.1,'Hips and chest visibly shift into the turn');
+    assert.ok(Math.abs(world[4])<1e-6&&Math.abs(world[1])<1e-6,'Torso has no sideways tilt');
+    for(const l of p.limbs){
+      assert.deepEqual(l.foot,[Math.sign(l.foot[0])*.43,.64,-.35]);
+      assert.deepEqual(l.hand,handlebarPose(r).grips[l.hand[0]<0?0:1]);
+      for(const [a,b,length] of [[l.hip,l.knee,.55],[l.knee,l.foot,.55],[l.shoulder,l.elbow,.55],[l.elbow,l.hand,.55]])
+        assert.ok(Math.abs(separation(a,b)-length)<.00001);
+    }
+    const before=r.rider.x;r.steer=0;
+    springRider(r,0,0,0,1/240);
+    assert.ok(r.rider.x/before>.99&&r.rider.x/before<1,'Recentering starts gradually');
     for(let i=0;i<720;i++)springRider(r,0,0,0,1/240);
-    assert.ok(Math.abs(r.rider.roll)<.001,'Straightening up remains smooth and settles');
+    assert.ok(Math.abs(r.rider.x)<.001&&Math.abs(r.rider.vx)<.001,'Lateral spring settles at center');
+    assert.ok(separation(riderPose(r).hips,riderPose(boat()).hips)<.001,'Pose returns to its supported resting stance');
   }
 });
 test('crouching stance preserves bent, fixed-length limbs at extreme hull and rider poses',()=>{
   const r=boat();
   for(const pitch of [-.75,0,.75])for(const roll of [-.85,0,.85])
   for(const x of [-.48,.48])for(const y of [-.38,.28])for(const z of [-.27,.25])for(const lean of [-.24,.24])for(const handlePitch of [-.12,.24]){
-    Object.assign(r,{pitch,roll,yaw:1.7});Object.assign(r.rider,{x,y,z,pitch:lean,roll:-lean*.38/.24,handlePitch,handleYaw:lean});
+    Object.assign(r,{pitch,roll,yaw:1.7});Object.assign(r.rider,{x,y,z,pitch:lean,roll:-lean*.38/.24,handlePitch});
     for(const l of riderPose(r).limbs){
-      for(const [a,b,length] of [[l.hip,l.knee,.55],[l.knee,l.foot,.55],[l.shoulder,l.elbow,.55],[l.elbow,l.hand,.53]])
+      for(const [a,b,length] of [[l.hip,l.knee,.55],[l.knee,l.foot,.55],[l.shoulder,l.elbow,.55],[l.elbow,l.hand,.55]])
         assert.ok(Math.abs(separation(a,b)-length)<.00001,'Limb segment retains its length');
       assert.ok(separation(l.hip,l.foot)<1.08,'Knees retain flexion');
       assert.ok(separation(l.shoulder,l.hand)<1.05,'Elbows retain flexion');
       assert.deepEqual(l.foot,[Math.sign(l.foot[0])*.43,.64,-.35]);
       assert.deepEqual(l.hand,handlebarPose(r).grips[l.hand[0]<0?0:1]);
     }
+  }
+});
+
+test('equal-length joint solver remains finite at degenerate and unreachable endpoints',()=>{
+  const a=[1,2,3];
+  for(const [delta,bend] of [
+    [[0,0,0],[0,0,0]],[[0,0,0],[0,0,1]],
+    [[1,0,0],[1,1e-12,0]],[[0,0,1],[0,0,1]],
+    [[0,0,1e-12],[0,1,0]],[[0,0,10],[0,1,0]]
+  ]){
+    const b=a.map((v,i)=>v+delta[i]),joint=solveJoint(a,b,bend);
+    assert.ok(joint.every(Number.isFinite));
+    assert.ok(Math.abs(separation(a,joint)-.55)<1e-9);
+    if(separation(a,b)<=1.099)assert.ok(Math.abs(separation(joint,b)-.55)<1e-6);
   }
 });

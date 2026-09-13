@@ -14,25 +14,26 @@ run.onclick=async()=>{
   const check=(ok,label)=>{if(!ok)throw Error(label);checks++;report.textContent=`${checks} passed · ${label}`;};
   const key=(code,type='keydown')=>w.dispatchEvent(new w.KeyboardEvent(type,{code,bubbles:true}));
   try{
-    for(const mode of ['free','main','reverse','rocky','sunrise']){
+    const buttons=d.querySelector('.'+selectors['course-menu']).children;
+    for(const [index,mode] of ['free','main','reverse','rocky','sunrise'].entries()){
       check(!$('title-screen').hidden,`${mode}: title menu`);
-      d.querySelector(`[data-course="${mode}"]`).click();await wait(120);
-      check(d.querySelector(`[data-course="${mode}"]`).getAttribute('aria-pressed')==='true',`${mode}: selection`);
+      buttons[index].click();await wait(120);
+      check(buttons[index].classList.contains(selectors.selected??'selected'),`${mode}: selection`);
       $('start').click();await wait(mode==='free'?200:3900);
       check(!$('hud').hidden&&$('title-screen').hidden,`${mode}: race starts`);
       key('KeyW');await wait(650);key('KeyW','keyup');
       check(Number($('speed').textContent)>0,`${mode}: throttle moves the craft`);
       key('Escape');key('Escape','keyup');await wait(80);
-      check(!$('pause-screen').hidden,`${mode}: pause`);
+      check(!$('title-screen').hidden&&$('start').textContent==='RESUME',`${mode}: pause`);
       const timer=$('timer').textContent;await wait(150);
       check($('timer').textContent===timer,`${mode}: paused timer stays fixed`);
-      $('resume').click();await wait(80);
-      check($('pause-screen').hidden,`${mode}: resume`);
+      $('start').click();await wait(80);
+      check($('title-screen').hidden,`${mode}: resume`);
       w.dispatchEvent(new w.Event('blur'));await wait(80);
-      check(!$('pause-screen').hidden,`${mode}: focus loss pauses`);
+      check(!$('title-screen').hidden,`${mode}: focus loss pauses`);
       const pausedTime=$('timer').textContent;
       key('KeyR');key('KeyR','keyup');key('Enter');key('Enter','keyup');await wait(80);
-      check(!$('pause-screen').hidden&&$('timer').textContent===pausedTime,`${mode}: removed restart shortcuts do nothing`);
+      check(!$('title-screen').hidden&&$('timer').textContent===pausedTime,`${mode}: removed restart shortcuts do nothing`);
       const gl=$('game').getContext('webgl');
       check(gl&&!gl.isContextLost()&&gl.getError()===0,`${mode}: WebGL and startup healthy`);
       $('course-menu').click();await wait(80);

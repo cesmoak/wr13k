@@ -14,3 +14,16 @@ test('rival engines fade with distance and pan relative to the camera',()=>{
   const overlap=rivalEngineMix(player,{...r,x:0});
   assert.ok(Number.isFinite(overlap.gain+overlap.pan));
 });
+
+test('simplified rival attenuation stays bounded and fades monotonically to silence',()=>{
+  const player={x:0,z:0,yaw:0};
+  let previous=Infinity;
+  for(let distance=0;distance<=180;distance++){
+    const mix=rivalEngineMix(player,{x:distance,z:0,speed:80});
+    assert.ok(mix.gain>=0&&mix.gain<=previous&&mix.gain<=.101);
+    assert.ok(Number.isFinite(mix.pan)&&Math.abs(mix.pan)<=.9);
+    if(distance>=140)assert.equal(mix.gain,0);
+    previous=mix.gain;
+  }
+  assert.deepEqual(rivalEngineMix(player,{x:12,z:4,speed:80}),rivalEngineMix(player,{x:12,z:4,speed:160}));
+});

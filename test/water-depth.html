@@ -1,0 +1,19 @@
+<!doctype html><meta charset="utf-8"><title>Water depth comparison</title><style>body{margin:0}canvas{width:100vw;height:100vh}aside{position:fixed;top:10px;left:10px;background:#fff;padding:12px}</style><canvas></canvas><aside><button id="offset">Depth bias: on</button><button id="freeze">Freeze</button><span id="status"></span></aside><script type="module">
+import {Renderer,TITLE_CAMERA} from '../src/renderer.js';
+import {createRace} from '../src/simulation.js';
+let bias=true,frozen=false;
+class Preview extends Renderer{
+ drawMesh(mesh,matrix,water){
+  const gl=this.gl,prepass=water===1&&!gl.getParameter(gl.COLOR_WRITEMASK)[0];
+  if(prepass&&!bias)gl.disable(gl.POLYGON_OFFSET_FILL);
+  if(prepass&&bias){gl.enable(gl.POLYGON_OFFSET_FILL);gl.polygonOffset(1,1);}
+  super.drawMesh(mesh,matrix,water);
+  if(prepass)gl.disable(gl.POLYGON_OFFSET_FILL);
+ }
+}
+const renderer=new Preview(document.querySelector('canvas')),race=createRace('free');race.phase='title';race.worldTime=12;race.lightingCourse={...race.course,lighting:'day'};
+TITLE_CAMERA.eye=[0,8,125];TITLE_CAMERA.target=[0,0,80];
+document.querySelector('#offset').onclick=e=>{bias=!bias;e.target.textContent='Depth bias: '+(bias?'on':'off');};
+document.querySelector('#freeze').onclick=()=>frozen=!frozen;
+let last=0;function frame(now){const dt=Math.min((now-last)/1000||0,1/30);last=now;if(!frozen)race.worldTime+=dt;renderer.draw(race,0);document.querySelector('#status').textContent=' WebGL '+renderer.gl.getError();requestAnimationFrame(frame);}requestAnimationFrame(frame);
+</script>

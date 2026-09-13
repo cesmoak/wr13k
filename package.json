@@ -6,9 +6,11 @@
   "scripts": {
     "dev": "node scripts/serve.mjs",
     "build": "node scripts/build.mjs",
+    "build:fast": "node scripts/build.mjs --fast",
     "preview": "node scripts/serve.mjs dist",
     "check:size": "node scripts/size.mjs",
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "courses": "node scripts/racing-lines.mjs"
   },
   "devDependencies": {
     "@gfx/zopfli": "1.0.15",
