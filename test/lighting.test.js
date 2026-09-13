@@ -1,60 +1,86 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { coursePoint, COURSES, RAINBOW_COLORS } from '../src/course.js';
+import { coursePoint, courseProgress, COURSES, RAINBOW_COLORS } from '../src/course.js';
 import { Renderer, courseLighting, projectSkyDirection, easeTitleLighting, flareAlignment } from '../src/renderer.js';
 import { lookAt, multiply, perspective } from '../src/math.js';
 import { rgb } from '../src/mesh.js';
 
+test('angular lighting progress follows both changing-light courses continuously across three laps',()=>{
+  for(const id of ['reverse','sunrise']){
+    const course=COURSES[id];let last=null;
+    for(let lap=1;lap<=3;lap++)for(let i=0;i<1000;i++){
+      const p=coursePoint(i/1000,course),progress=courseProgress(p.x,p.z,course);
+      assert.ok(progress>=0&&progress<1);
+      const light=courseLighting(p.x,p.z,{lap},course);
+      if(last!==null){
+        const change=(light.altitude-last)*(id==='sunrise'?1:-1);
+        assert.ok(change>=-1e-12&&change<.003,`${id}: continuous forward lighting at lap ${lap}, sample ${i}`);
+      }
+      last=light.altitude;
+    }
+  }
+});
+
+test('angular progress starts at zero and is independent of distance from the course center',()=>{
+  for(const course of Object.values(COURSES)){
+    const [x,z]=course.points[0];
+    assert.equal(courseProgress(x,z,course),0);
+    const [cx,cz]=course.progressCenter;
+    for(const t of [.2,.5,.8]){
+      const p=coursePoint(t,course),expected=courseProgress(p.x,p.z,course);
+      for(const radius of [.5,1.5,3])assert.ok(Math.abs(courseProgress(cx+(p.x-cx)*radius,cz+(p.z-cz)*radius,course)-expected)<1e-12);
+    }
+  }
+});
+
 test('main stays in daylight, rocky stays at night, and reverse fades from sunset to dusk',()=>{
-  for(const [id,label,night] of [['main','DAY',0],['rocky','NIGHT',1]]){
+  for(const [id,night] of [['main',0],['rocky',1]]){
     const course=COURSES[id];
     for(const lap of [1,2,3])for(const t of [0,.5,.9999]){
-      const p=coursePoint(t,course),l=courseLighting(p.x,p.z,'auto',{lap},course,180);
-      assert.equal(l.label,label);assert.equal(l.night,night);
+      const p=coursePoint(t,course),l=courseLighting(p.x,p.z,{lap},course,180);
+      assert.equal(l.night,night);
     }
   }
   const course=COURSES.reverse;let last=1;
   for(const lap of [1,2,3])for(const t of [0,.25,.5,.75,.9999]){
-    const p=coursePoint(t,course),l=courseLighting(p.x,p.z,'auto',{lap},course);
+    const p=coursePoint(t,course),l=courseLighting(p.x,p.z,{lap},course);
     assert.ok(l.altitude<=last+.001);last=l.altitude;
   }
   const p=coursePoint(0,course);
-  assert.equal(courseLighting(p.x,p.z,'auto',{lap:1,passed:0},course).label,'SUNSET');
-  const finish=courseLighting(p.x,p.z,'auto',{lap:3,passed:49,finishTime:130},course);
-  assert.equal(finish.label,'DUSK');assert.ok(Math.abs(finish.altitude+.2)<1e-12);
+  assert.equal(courseLighting(p.x,p.z,{lap:1,passed:0},course).altitude,.24);
+  const finish=courseLighting(p.x,p.z,{lap:3,passed:49,finishTime:130},course);
+  assert.ok(Math.abs(finish.altitude+.2)<1e-12);
 });
 
-test('reverse sunset remains continuous over lap seams and manual lighting overrides all courses',()=>{
+test('reverse sunset remains continuous over lap seams',()=>{
   const course=COURSES.reverse,before=coursePoint(.9999,course),after=coursePoint(.0001,course);
   for(const lap of [1,2]){
-    const a=courseLighting(before.x,before.z,'auto',{lap},course);
-    const b=courseLighting(after.x,after.z,'auto',{lap:lap+1},course);
+    const a=courseLighting(before.x,before.z,{lap},course);
+    const b=courseLighting(after.x,after.z,{lap:lap+1},course);
     assert.ok(Math.abs(a.altitude-b.altitude)<.001);
   }
-  assert.equal(courseLighting(after.x,after.z,'auto',{lap:2,passed:32,nextGate:0},course).progress,1);
-  assert.equal(courseLighting(before.x,before.z,'auto',{lap:3,passed:33,nextGate:1},course).progress,0);
-  for(const c of Object.values(COURSES)){
-    assert.equal(courseLighting(0,0,'night',{},c,60).night,1);
-    assert.equal(courseLighting(0,0,'day',{},c,120).night,0);
-  }
+  const end=courseLighting(after.x,after.z,{lap:2,passed:32,nextGate:0},course);
+  const start=courseLighting(before.x,before.z,{lap:3,passed:33,nextGate:1},course);
+  assert.equal(end.altitude,start.altitude,'Checkpoint state keeps the sky continuous across the seam');
+  assert.ok(Math.abs(end.altitude-(.24-.44*2/3))<1e-12);
 });
 
 test('free play cycles through day, sunset, night and sunrise by time even when stationary',()=>{
   const course=COURSES.free;
-  for(const [time,label] of [[0,'DAY'],[60,'SUNSET'],[120,'NIGHT'],[180,'SUNRISE'],[240,'DAY']]){
-    const a=courseLighting(0,0,'auto',{passed:0},course,time);
-    const b=courseLighting(300,-200,'auto',{passed:0},course,time);
-    assert.equal(a.label,label);assert.equal(a.altitude,b.altitude);
+  for(const [time,altitude] of [[0,1],[60,0],[120,-1],[180,0],[240,1]]){
+    const a=courseLighting(0,0,{passed:0},course,time);
+    const b=courseLighting(300,-200,{passed:0},course,time);
+    assert.ok(Math.abs(a.altitude-altitude)<1e-12);assert.equal(a.altitude,b.altitude);
     assert.deepEqual(a.sunDirection,b.sunDirection);
   }
-  const a=courseLighting(0,0,'auto',{},course,239.999),b=courseLighting(0,0,'auto',{},course,240.001);
+  const a=courseLighting(0,0,{},course,239.999),b=courseLighting(0,0,{},course,240.001);
   assert.ok(Math.hypot(...a.sunDirection.map((v,i)=>v-b.sunDirection[i]))<.001);
 });
 
 test('title lighting rotates smoothly between course settings without a sudden sun jump',()=>{
-  let current=courseLighting(0,0,'auto',{},COURSES.main);
+  let current=courseLighting(0,0,{},COURSES.main);
   for(const course of [COURSES.rocky,COURSES.sunrise,COURSES.reverse,COURSES.main]){
-    const target=courseLighting(0,0,'auto',{},course);
+    const target=courseLighting(0,0,{},course);
     const held=easeTitleLighting(current,target,0);
     assert.ok(Math.abs(held.altitude-current.altitude)<1e-12);
     for(let i=0;i<360;i++){
@@ -90,7 +116,7 @@ test('distant sky follows camera rotation and pitch, without translation paralla
 
 test('sun directions stay normalized across course profiles and the free-play cycle',()=>{
   for(const course of Object.values(COURSES))for(const lap of [1,2,3])for(const t of [0,.25,.5,.75,.9999]){
-    const p=coursePoint(t,course),l=courseLighting(p.x,p.z,'auto',{lap},course,t*240);
+    const p=coursePoint(t,course),l=courseLighting(p.x,p.z,{lap},course,t*240);
     assert.ok(Math.abs(Math.hypot(...l.sunDirection)-1)<1e-12);
   }
 });

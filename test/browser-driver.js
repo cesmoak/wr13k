@@ -16,11 +16,19 @@ function key(code,down){
 function release(){for(const code of [...held])key(code,false);}
 function tap(code){key(code,true);key(code,false);}
 function check(condition,message){results.push(`${condition?'PASS':'FAIL'} ${message}`);report(results.join('\n'));if(!condition)throw Error(message);}
+async function startFromMenu(){
+  if(race.phase==='lost'||race.phase==='finished')document.getElementById('back-home').click();
+  else if(race.phase!=='title'){
+    if(race.phase!=='paused')tap('Escape');
+    document.getElementById('course-menu').click();
+  }
+  await delay(100);document.getElementById('start').click();
+}
 
 async function run(){
   auto=false;release();results.length=0;report('Running controls…');
-  document.getElementById('start').click();
-  // Isolate the controls from opponent bumps/wakes; R below restores all racers.
+  await startFromMenu();
+  // Isolate controls from opponents; starting from Courses restores the grid.
   for(const opponent of race.racers.slice(1))opponent.finishTime=0;
   await delay(4000);
   const idleYaw=race.racers[0].yaw;
@@ -33,16 +41,18 @@ async function run(){
   release();const speed=race.racers[0].speed;key('KeyS',true);await delay(350);key('KeyS',false);check(race.racers[0].speed<speed,'S brakes');
   tap('Escape');await delay(100);const time=race.time;await delay(250);check(race.phase==='paused'&&race.time===time&&!document.getElementById('pause-screen').hidden,'Escape pauses simulation and shows menu');
   tap('Escape');await delay(100);check(race.phase==='racing','Escape resumes');
-  tap('KeyM');await delay(100);check(gameState.sound.muted,'M mutes');tap('KeyM');
-  window.dispatchEvent(new Event('blur'));await delay(100);check(race.phase==='paused','Focus loss pauses');tap('Escape');
-  tap('KeyR');await delay(100);check(race.time===0&&race.racers.every(r=>r.passed===0),'R resets the race');
+  window.dispatchEvent(new Event('blur'));await delay(100);check(race.phase==='paused','Focus loss pauses');
+  const pausedTime=race.time;tap('KeyR');tap('Enter');await delay(100);
+  check(race.phase==='paused'&&race.time===pausedTime,'Removed restart shortcuts leave the race paused');
+  document.getElementById('course-menu').click();await delay(100);document.getElementById('start').click();await delay(100);
+  check(race.time===0&&race.racers.every(r=>r.passed===0),'Starting from Courses creates a fresh race');
   auto=true;frames=0;started=performance.now();maxSpeed=0;sawSpeedBonus=false;sawAir=false;
   report(results.join('\n')+'\nDriving full race with keyboard inputs…');
 }
 // Deterministic checkpoint fixtures exercise the real simulation events and HUD.
 async function runLevels(){
   auto=false;release();results.length=0;
-  document.getElementById('start').click();race.phase='racing';await delay(100);
+  await startFromMenu();race.phase='racing';await delay(100);
   check(document.getElementById('speed-level-value').textContent==='1 / 5','HUD starts at speed level 1');
   const crossFixture=(offset=0)=>{
     const p=race.racers[0],g=race.course.gates[p.nextGate],n=g.tangent;
@@ -65,14 +75,16 @@ async function runLevels(){
   check(race.phase==='lost'&&!document.getElementById('results').hidden,'Fifth miss shows the loss screen');
   check(document.getElementById('finish-title').textContent==='Race over'&&document.getElementById('result-list').hidden,'HUD and results explain the loss');
   const time=race.worldTime;await delay(250);check(race.worldTime===time,'Loss freezes simulation');
-  document.getElementById('retry').click();await delay(100);
-  check(document.getElementById('speed-level-value').textContent==='1 / 5'&&race.racers[0].misses===0,'Retry clears misses and the speed chain');
+  tap('KeyR');tap('Enter');await delay(100);
+  check(race.phase==='lost'&&race.racers[0].misses===5,'Removed restart shortcuts leave the loss screen unchanged');
+  document.getElementById('back-home').click();await delay(100);document.getElementById('start').click();await delay(100);
+  check(document.getElementById('speed-level-value').textContent==='1 / 5'&&race.racers[0].misses===0,'Starting from Courses clears misses and the speed chain');
   check(renderer.gl.getError()===renderer.gl.NO_ERROR,'Transparent water scene has no WebGL errors');
   report(results.join('\n')+'\nSPEED LEVEL CHECKS COMPLETE');
 }
 async function runInteractions(){
   auto=false;release();results.length=0;
-  document.getElementById('start').click();race.phase='racing';await delay(100);
+  await startFromMenu();race.phase='racing';await delay(100);
   const p=race.racers[0],b=race.buoys[2];
   Object.assign(p,{x:b.x-7,z:b.z,yaw:Math.PI/2,vx:35,vz:0,speed:35,nextGate:b.gate});
   resetBoat(p,race.worldTime,race.wakes);key('KeyW',true);await delay(300);release();
@@ -112,12 +124,13 @@ async function runModes(){
     const titleTime=gameState.titleRace.worldTime,eye=[...renderer.eye];
     document.querySelector(`[data-course="${id}"]`).click();await delay(100);
     check(gameState.titleRace.worldTime>=titleTime&&gameState.titleRace.worldTime<titleTime+.5,`${id} preserves the camera and lighthouse clock`);
-    check(Math.hypot(...renderer.eye.map((v,i)=>v-eye[i]))<2,`${id} keeps the title camera moving continuously`);
+    check(renderer.eye.every((v,i)=>v===eye[i]),`${id} keeps the title camera fixed`);
     check(race.course.id===id&&race.course.gates.length===count&&race.buoys.length===count+1,`${id} loads its own buoy layout`);
     check(renderer.gateMeshes.length===count+1&&!document.body.classList.contains('free-play'),`${id} rebuilds markers and restores racing HUD`);
     document.getElementById('start').click();await delay(100);
     check(race.phase==='countdown'&&race.racers.length===4,`${id} starts a four-rider race`);
-    tap('KeyR');await delay(100);check(race.course.id===id&&race.racers[0].passed===0,`${id} restart retains the selected route`);
+    const countdown=race.countdown;tap('KeyR');await delay(100);
+    check(race.course.id===id&&race.countdown<countdown,`${id} countdown continues when R is pressed`);
     tap('Escape');document.getElementById('course-menu').click();await delay(100);
   }
   check(renderer.gl.getError()===0,'Course switching has no WebGL errors');

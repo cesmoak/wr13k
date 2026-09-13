@@ -1,3 +1,5 @@
+// Replaced with false by the production minifier; fixtures retain diagnostics.
+export const DEVELOPMENT = true;
 export const TAU = Math.PI * 2;
 export const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 export const lerp = (a, b, t) => a + (b - a) * t;

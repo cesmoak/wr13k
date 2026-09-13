@@ -40,18 +40,17 @@ test('reef rocks repel a hull instead of allowing it through the scenery',()=>{
 test('sunrise rises continuously from predawn through the horizon to daylight over three laps',()=>{
   const course=COURSES.sunrise;let last=-1;
   for(const lap of [1,2,3])for(let i=0;i<100;i++){
-    const p=coursePoint(i/100,course),l=courseLighting(p.x,p.z,'auto',{lap},course);
+    const p=coursePoint(i/100,course),l=courseLighting(p.x,p.z,{lap},course);
     assert.ok(l.altitude>=last-.0001);last=l.altitude;
   }
   const p=coursePoint(0,course);
-  const start=courseLighting(p.x,p.z,'auto',{lap:1,passed:0},course);
-  const finish=courseLighting(p.x,p.z,'auto',{lap:3,finishTime:120},course);
+  const start=courseLighting(p.x,p.z,{lap:1,passed:0},course);
+  const finish=courseLighting(p.x,p.z,{lap:3,finishTime:120},course);
   assert.ok(start.sunDirection[1]<0&&finish.sunDirection[1]>0);
   assert.ok(start.night>.9);assert.equal(finish.night,0);
-  assert.equal(start.label,'SUNRISE');assert.equal(finish.label,'DAY');
   for(const lap of [1,2]){
     const a=coursePoint(.99999,course),b=coursePoint(.00001,course);
-    assert.ok(Math.abs(courseLighting(a.x,a.z,'auto',{lap},course).altitude-
-      courseLighting(b.x,b.z,'auto',{lap:lap+1},course).altitude)<.001);
+    assert.ok(Math.abs(courseLighting(a.x,a.z,{lap},course).altitude-
+      courseLighting(b.x,b.z,{lap:lap+1},course).altitude)<.001);
   }
 });

@@ -9,7 +9,7 @@ test('free play has no race, markers, gate events, or out-of-course penalty',()=
   const p=race.racers[0];p.x=-400;p.z=-300;
   for(let i=0;i<600;i++)stepRace(race,{throttle:1},1/60);
   checkGate(p,{x:0,z:0},race);
-  assert.ok(p.speed>10);assert.equal(race.time,0);assert.equal(p.passed,0);assert.equal(p.misses,0);assert.equal(p.offCourse,0);
+  assert.ok(p.speed>10);assert.equal(race.time,0);assert.equal(p.passed,0);assert.equal(p.misses,0);
   assert.ok(!race.events.some(e=>['gate','lap','finish','miss','go','beep'].includes(e.type)));
   race.phase='paused';const time=race.worldTime;stepRace(race,{throttle:1},1);assert.equal(race.worldTime,time);
   startRace(race);assert.equal(race.course.id,'free');assert.equal(race.phase,'racing');

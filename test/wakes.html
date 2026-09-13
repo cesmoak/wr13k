@@ -6,7 +6,7 @@ import { Renderer } from '../src/renderer.js';
 import { createRace } from '../src/simulation.js';
 import { waveHeight } from '../src/course.js';
 const race=createRace('free'),renderer=new Renderer(document.getElementById('game')),r=race.racers[0];
-race.phase='racing';renderer.lightMode='day';let frozen=false,last=0,a=0,speed=48;
+race.phase='racing';race.lightingCourse={...race.course,lighting:'day'};let frozen=false,last=0,a=0,speed=48;
 function level(n){r.speedLevel=n;renderer.particles=[];renderer.wakeHeads=[];}
 document.getElementById('foam').onclick=()=>level(1);
 document.getElementById('rainbow').onclick=()=>level(5);

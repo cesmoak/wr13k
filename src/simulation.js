@@ -1,5 +1,5 @@
 import { clamp, lerp, angleDelta, distance } from './math.js';
-import { COURSES, GATE_WIDTH, LAPS, coursePoint, courseTangent, waveHeight, shoreRadius, nearestCourse, MAX_WAKES, landforms } from './course.js';
+import { COURSES, GATE_WIDTH, LAPS, coursePoint, courseTangent, shoreRadius, MAX_WAKES, landforms } from './course.js';
 import { newBoatState, resetBoat, stepBoat, MAX_SPEED_LEVEL, speedMultiplier, steeringAuthority } from './boat-physics.js';
 
 import { createBuoys, stepBuoys, collideBuoys, collideRacers } from './interactions.js';
@@ -10,7 +10,7 @@ export function createRacer(id,course=COURSES.rocky) {
   const racer = { ...newBoatState(), id, x: p.x + tangent.z * lane, z: p.z - tangent.x * lane, y: 0, vy: 0,
     yaw: Math.atan2(tangent.x, tangent.z), pitch: 0, roll: 0, speed: 0, vx: 0, vz: 0,
     speedLevel: 1, impactCooldown: 0, misses: 0, passed: 0, nextGate: 0, lap: 1, finishTime: null,
-    offCourse: 0, steer: 0, airborne: false };
+    steer: 0, airborne: false };
   resetBoat(racer, 0);
   return racer;
 }
@@ -89,10 +89,10 @@ export function aiInput(racer, race) {
   const gates=race.course.gates,GATE_COUNT=gates.length;
   if(race.freePlay)return racer.id>0?rivalInput(racer,race):{};
   if(racer.id>0)return rivalInput(racer,race);
-  const skill=racer.id===0?0:race.course.aiSkill;
+  // This controller drives player ID 0 in title previews and tests.
   const gate = gates[racer.nextGate], d = distance(racer, gate);
   // Center the channel line; leave room to brake before the shore-side slalom.
-  const lane = gate.side * (gate.channel ? 2 : Math.min(10,gate.width*.6)) + Math.sin(racer.id * 2.4 + racer.nextGate * 1.7) * (1.5-skill*.5);
+  const lane = gate.side * (gate.channel ? 2 : Math.min(10,gate.width*.6)) + Math.sin(racer.nextGate * 1.7) * 1.5;
   const x = gate.x + gate.tangent.z * lane;
   const z = gate.z - gate.tangent.x * lane;
   const heading = Math.atan2(x - racer.x, z - racer.z);
@@ -103,12 +103,11 @@ export function aiInput(racer, race) {
   const corner = Math.abs(angleDelta(exit, heading));
   // Read the next direction change early: the reduced steering and rough water
   // require actual braking instead of holding half throttle through a slalom.
-  const straight = Math.abs(turn) < .12+skill*.025 && (corner < .3+skill*.08 || racer.nextGate === 1) && d > Math.max(55-skill*3,racer.speed);
-  const cruise=[43,41.5,40,38.5][racer.id]+skill*4;
+  const straight = Math.abs(turn) < .12 && (corner < .3 || racer.nextGate === 1) && d > Math.max(55,racer.speed);
   const pace=speedMultiplier(racer);
-  const targetSpeed = (straight ? 50 : clamp(cruise / (1 + corner * (.9-skill*.07) * clamp((85-d)/55,0,1) + Math.abs(turn) * .9), 14, 43+skill*4))*pace;
+  const targetSpeed = (straight ? 50 : clamp(43 / (1 + corner * .9 * clamp((85-d)/55,0,1) + Math.abs(turn) * .9), 14, 43))*pace;
   return { throttle: racer.speed < targetSpeed ? 1 : 0, brake: racer.speed > targetSpeed + 3,
-    steer: clamp(turn * (1.8+skill*.15), -1, 1) };
+    steer: clamp(turn * 1.8, -1, 1) };
 
 }
 
@@ -173,11 +172,10 @@ export function updateRacer(racer, input, dt, race, deferChecks = false) {
     }
   }
 
-  if(!deferChecks){collideBuoys(race,racer);updateProgress(racer,old,dt,race);}
+  if(!deferChecks){collideBuoys(race,racer);updateProgress(racer,old,race);}
 }
-function updateProgress(racer,old,dt,race){
+function updateProgress(racer,old,race){
   if(race.freePlay){
-    racer.offCourse=0;
     // Riders cruise the main loop indefinitely using invisible waypoints.
     // Advancing their steering target never awards race progress or speed levels.
     if(racer.id>0){
@@ -188,7 +186,6 @@ function updateProgress(racer,old,dt,race){
     }
     return;
   }
-  racer.offCourse = nearestCourse(racer.x, racer.z,race.course).distance > 65 ? racer.offCourse + dt : 0;
   checkGate(racer, old, race);
 }
 
@@ -222,7 +219,7 @@ export function stepRace(race, input, dt) {
   race.racers.forEach((r,i)=>updateRacer(r,controls[i],dt,race,true));
   collideRacers(race);
   for(const r of race.racers)collideBuoys(race,r);
-  race.racers.forEach((r,i)=>updateProgress(r,old[i],dt,race));
+  race.racers.forEach((r,i)=>updateProgress(r,old[i],race));
   race.wakes = race.wakes.filter(w => race.worldTime - w.time < 2.8);
   for (const racer of race.racers) {
     racer.wakeClock += dt;

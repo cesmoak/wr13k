@@ -10,7 +10,7 @@ const race=createRace(),renderer=new Renderer(document.getElementById('game'));r
 const reefButton=document.createElement('button');reefButton.id='outer-reef';reefButton.textContent='Outer reef slalom';
 document.querySelector('aside').prepend(reefButton);
 reefButton.onclick=()=>{
- Object.assign(race,createRace('sunrise'),{phase:'racing'});renderer.lightMode='day';
+ Object.assign(race,createRace('sunrise'),{phase:'racing'});race.lightingCourse={...race.course,lighting:'day'};
  for(const r of race.racers){Object.assign(r,{x:365+r.id*5,z:103+r.id*8,yaw:Math.atan2(30,-100),nextGate:5});resetBoat(r,race.worldTime);}
  renderer.cameraReady=false;
  document.getElementById('status').textContent='Sunrise outer reef · weave between staggered outcrops east of the smaller island';
@@ -29,17 +29,17 @@ for(const button of document.querySelectorAll('[data-lap]'))button.onclick=()=>{
  const id={1:'main',2:'reverse',3:'rocky'}[button.dataset.lap];
  Object.assign(race,createRace(id),{phase:'racing'});const course=race.course;
  const p=coursePoint(.5,course),v=courseTangent(.5,course);
- renderer.lightMode='auto';
+ delete race.lightingCourse;
  Object.assign(race.racers[0],p,{yaw:Math.atan2(v.x,v.z),lap:2,passed:course.gates.length+Math.floor(course.gates.length/2),nextGate:Math.floor(course.gates.length/2)});
  resetBoat(race.racers[0],race.worldTime);renderer.cameraReady=false;
- document.getElementById('status').textContent=course.description;
+ document.getElementById('status').textContent=course.name;
 };
 document.getElementById('beach').onclick=()=>{
  station(0);const p=race.racers[0];Object.assign(p,{x:5,z:-127,yaw:0});
  resetBoat(p,race.worldTime);renderer.cameraReady=false;
  document.getElementById('status').textContent='Beach surf · broad foam lines travel toward the sand';
 };
-document.getElementById('night').onclick=()=>renderer.lightMode=renderer.lightMode==='night'?'auto':'night';
+document.getElementById('night').onclick=()=>race.lightingCourse=race.lightingCourse?null:{...race.course,lighting:'night'};
 document.getElementById('beacon').onclick=()=>{
  station(10);const p=race.racers[0];p.x=LIGHTHOUSE.x-125;p.z=LIGHTHOUSE.z-145;p.yaw=Math.atan2(LIGHTHOUSE.x-p.x,LIGHTHOUSE.z-p.z);
  resetBoat(p,race.worldTime);renderer.cameraReady=false;
@@ -56,7 +56,7 @@ station(10);let last=0;
 function frame(now){const dt=Math.min((now-last)/1000||0,1/30);last=now;race.worldTime+=dt;
  for(const r of race.racers)stepBoat(r,{},Math.max(dt,.001),race.worldTime,[],undefined,true);
  renderer.draw(race,dt);
- document.getElementById('lighting').textContent=`${renderer.lighting.label} · WebGL ${renderer.gl.getError()===0?'OK':'ERROR'} · Camera ${renderer.eye[1].toFixed(2)} · Hull ${race.racers[0].y.toFixed(2)}`;
+ document.getElementById('lighting').textContent=`WebGL ${renderer.gl.getError()===0?'OK':'ERROR'} · Camera ${renderer.eye[1].toFixed(2)} · Hull ${race.racers[0].y.toFixed(2)}`;
  requestAnimationFrame(frame);
 }requestAnimationFrame(frame);
 </script></html>

@@ -133,7 +133,9 @@ test('shoreline and offshore circuit clears all three islands and varies buoy sp
     const race=racing(),r=race.racers[0],g=gates[i];r.nextGate=i;
     assert.equal(g.side,-gates[i-1].side);
     if(g.slalom){
-      const nominal=coursePoint(g.t),offset=(nominal.x-g.x)*g.tangent.z-(nominal.z-g.z)*g.tangent.x;
+      // Nominal offshore slalom stations, before their lateral displacement.
+      const station={1:1.35,2:2.4,12:12.25,13:13.05}[i];
+      const nominal=coursePoint(station/18),offset=(nominal.x-g.x)*g.tangent.z-(nominal.z-g.z)*g.tangent.x;
       cross(race,i,offset);assert.equal(r.misses,1,'Middle line misses a slalom buoy');r.nextGate=i;
     }
     const misses=r.misses;cross(race,i,g.side*(GATE_WIDTH+3));assert.equal(r.misses,misses+1,'Wrong side counts as a miss');r.nextGate=i;

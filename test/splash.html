@@ -1,6 +1,6 @@
 <!doctype html><html lang="en"><meta charset="utf-8"><title>Sunwake Rush splash preview</title>
 <style>body{margin:0;font:14px Arial;background:#183b3a;color:white}canvas{width:100vw;height:100vh;display:block}aside{position:fixed;top:16px;left:16px;background:#183b3add;padding:14px}button{padding:10px;cursor:pointer}</style>
-<canvas id="game"></canvas><aside><button id="soft">Small landing</button> <button id="hard">Hard landing</button> <button id="mute">Mute / unmute</button><p id="status">Choose a landing to enable audio.</p></aside>
+<canvas id="game"></canvas><aside><button id="soft">Small landing</button> <button id="hard">Hard landing</button> <p id="status">Choose a landing to enable audio.</p></aside>
 <script type="module">
 import { Renderer } from '../src/renderer.js';
 import { RaceAudio } from '../src/audio.js';
@@ -10,12 +10,11 @@ let last=0,accumulator=0,count=0,strength=0,active=false;
 async function drop(height){await sound.unlock();startRace(race);Object.assign(race.racers[0],{x:-350,z:350,y:height,vy:-2,vx:0,vz:0,airborne:true});count=0;strength=0;accumulator=0;active=true;}
 document.getElementById('soft').onclick=()=>drop(2);
 document.getElementById('hard').onclick=()=>drop(8);
-document.getElementById('mute').onclick=()=>sound.toggle();
 function frame(now){const dt=Math.min((now-last)/1000||0,.05);last=now;
  if(active){accumulator+=dt;while(accumulator>=1/60){stepRace(race,{},1/60);accumulator-=1/60;}
  for(const e of race.events){sound.event(e);if(e.type==='splash'){count++;strength=e.strength;}}
  race.events.length=0;
- document.getElementById('status').textContent=`${count} splashes · Impact ${strength.toFixed(1)} · Audio ${sound.context?.state} · ${sound.muted?'MUTED':'ON'} · WebGL ${renderer.gl.getError()===0?'OK':'ERROR'}`;
+ document.getElementById('status').textContent=`${count} splashes · Impact ${strength.toFixed(1)} · Audio ${sound.context?.state} · WebGL ${renderer.gl.getError()===0?'OK':'ERROR'}`;
  }renderer.draw(race,dt);requestAnimationFrame(frame);
 }requestAnimationFrame(frame);
 </script></html>

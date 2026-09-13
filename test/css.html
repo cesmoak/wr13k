@@ -1,0 +1,48 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>CSS equivalence checks</title>
+<style>body{background:#203f3c;color:white;font:13px monospace}button{padding:12px}iframe{position:absolute;left:-10000px;top:100px;border:0}pre{white-space:pre-wrap}</style>
+<button id="run">Compare CSS layouts</button><pre id="report">Compares computed styles across screen sizes, menus, HUD, night mode, and free play.</pre>
+<script type="module">
+const report=document.querySelector('#report'),run=document.querySelector('#run');
+run.onclick=async()=>{
+  run.disabled=true;const frames=[];
+  try{
+    const baseline=new URLSearchParams(location.search).get('baseline');
+    const [original,css,packed,{selectors={}}]=await Promise.all([
+      fetch(baseline||'../index.html').then(r=>r.text()),fetch('../style.css').then(r=>r.text()),
+      fetch('../dist/index.html').then(r=>r.text()),fetch('../dist/size-report.json').then(r=>r.json())]);
+    const strip=html=>html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/g,'');
+    for(const html of [original.replace('<link rel="stylesheet" href="style.css">',()=>`<style>${css}</style>`),packed]){
+      const frame=document.createElement('iframe');frames.push(frame);
+      const loaded=new Promise(resolve=>frame.onload=resolve);frame.srcdoc=strip(html);document.body.append(frame);await loaded;
+    }
+    const differences=[];let layouts=0;
+    for(const [width,height] of [[1280,720],[1920,1080],[850,700],[540,520]]){
+      for(const frame of frames){frame.style.width=width+'px';frame.style.height=height+'px';}
+      for(const night of [false,true])for(const free of [false,true])for(const screen of ['title-screen','hud','pause-screen','results']){
+        frames.forEach((frame,index)=>{
+          const d=frame.contentDocument,map=name=>index?(selectors[name]??name):name,$=id=>d.getElementById(map(id));
+          d.body.className=[night?'night':'',free?'free-play':'',screen==='title-screen'?'':'playing'].filter(Boolean).map(map).join(' ');
+          for(const id of ['title-screen','hud','pause-screen','results'])$(id).hidden=id!==screen;
+          $('countdown').hidden=screen!=='hud';
+          $('miss-counter').classList.add(map('danger'));$('speed-level').dataset.level='5';
+          $('leaderboard').innerHTML=`<div class="${map('rider-row')} ${map('you')}"><b>1</b><i class="${map('rider-dot')}"></i><span>YOU</span></div>`;
+          $('result-list').innerHTML=`<div class="${map('result-row')} ${map('you')}"><b>1</b><i></i><span>YOU</span><span>01:00</span></div>`;
+        });
+        const nodes=frames.map(f=>[f.contentDocument.body,...f.contentDocument.body.querySelectorAll('*')]);
+        if(nodes[0].length!==nodes[1].length)throw Error('DOM element counts differ');
+        for(let i=0;i<nodes[0].length;i++)for(const pseudo of [null,'::before','::after']){
+          const styles=frames.map((f,j)=>f.contentWindow.getComputedStyle(nodes[j][i],pseudo));
+          // Minification may serialize equivalent zero lengths as 0px or 0%.
+          const normalized=value=>value.replace(/\b0(?:px|%)(?=[, )]|$)/g,'0');
+          for(const key of styles[0])if(normalized(styles[0].getPropertyValue(key))!==normalized(styles[1].getPropertyValue(key))){
+            if(differences.length<12)differences.push(`${width}×${height} ${screen} night=${night} free=${free}: ${nodes[0][i].id||nodes[0][i].className||nodes[0][i].tagName}${pseudo||''} ${key}: ${styles[0].getPropertyValue(key)} → ${styles[1].getPropertyValue(key)}`);
+          }
+        }
+        layouts++;
+      }
+    }
+    report.textContent=differences.length?'FAIL\n'+differences.join('\n'):`PASS — ${layouts} layouts have identical computed styles, including pseudo-elements.`;
+  }catch(error){report.textContent='FAIL — '+error.message;}
+  finally{frames.forEach(f=>f.remove());run.disabled=false;}
+};
+</script></html>

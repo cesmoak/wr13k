@@ -1,6 +1,6 @@
 import { TAU, randomSeed, modelMatrix } from './math.js';
 import { riderPose } from './boat-physics.js';
-import { gates, GATE_WIDTH, shoreRadius, RACER_COLORS, islands, landforms, RAINBOW_COLORS, LIGHTHOUSE, seabedHeight, coursePoint, waveHeight } from './course.js';
+import { gates, shoreRadius, RACER_COLORS, islands, landforms, RAINBOW_COLORS, LIGHTHOUSE, seabedHeight, coursePoint, waveHeight } from './course.js';
 
 export function rgb(hex) { return [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255); }
 export class MeshBuilder {
@@ -118,8 +118,8 @@ export function createRiderMesh(racer) {
   for (const limb of pose.limbs) {
     mesh.beam(limb.hip, limb.knee, .28, suit);
     mesh.beam(limb.knee, limb.foot, .25, suit);
-    mesh.beam(limb.shoulder, limb.elbow, .20, white);
-    mesh.beam(limb.elbow, limb.hand, .18, suit);
+    mesh.beam(limb.shoulder, limb.elbow, .20, suit);
+    mesh.beam(limb.elbow, limb.hand, .18, white);
     // A planted boot defines the ankle and points forward along the deck.
     mesh.box(limb.foot[0],.61,limb.foot[2]+.10,.27,.18,.48,dark);
     mesh.sphere(...limb.hand,.12,.12,.12,dark,6,3);
@@ -140,20 +140,17 @@ export function createGateMesh(index, active=false, buoySide=gates[index].side,c
   const mesh=new MeshBuilder(), gate=courseGates[index], white=rgb('#fff6df'),dark=rgb('#203f49');
   const color=rgb(gate.side>0?(active?'#ff9582':'#ff7669'):(active?'#8ffdf3':'#66e6ed'));
   // A single marker alternates sides; the start/finish keeps a checkered pair.
-  for(const side of [buoySide]) {
-    const x=0;
-    mesh.cone(x,-.65,0,2.2,1.7,1.25,dark);
-    mesh.cone(x,.6,0,1.7,1.15,1.2,white);
-    mesh.cone(x,1.8,0,1.15,.3,3.4,color);
-    mesh.box(x,6.2,0,.18,4,.18,dark);
-    mesh.quad([x,8.2,0],[x-side*3.7,8.2,0],[x-side*3.7,6.5,0],[x,6.5,0],color);
-    // Dark chevron points toward the legal passing side.
-    const mid=x-side*1.8;
-    mesh.beam([mid+side*.6,7.9,-.03],[mid-side*.3,7.35,-.03],.22,dark);
-    mesh.beam([mid-side*.3,7.35,-.03],[mid+side*.6,6.8,-.03],.22,dark);
-    if(index===0)for(let row=0;row<2;row++)for(let col=0;col<4;col++)
-      mesh.box(x-side*(col+.5)*.9,6.9+row*.75,-.06,.9,.75,.1,(row+col)%2?dark:white);
-  }
+  mesh.cone(0,-.65,0,2.2,1.7,1.25,dark);
+  mesh.cone(0,.6,0,1.7,1.15,1.2,white);
+  mesh.cone(0,1.8,0,1.15,.3,3.4,color);
+  mesh.box(0,6.2,0,.18,4,.18,dark);
+  mesh.quad([0,8.2,0],[-buoySide*3.7,8.2,0],[-buoySide*3.7,6.5,0],[0,6.5,0],color);
+  // Dark chevron points toward the legal passing side.
+  const mid=-buoySide*1.8;
+  mesh.beam([mid+buoySide*.6,7.9,-.03],[mid-buoySide*.3,7.35,-.03],.22,dark);
+  mesh.beam([mid-buoySide*.3,7.35,-.03],[mid+buoySide*.6,6.8,-.03],.22,dark);
+  if(index===0)for(let row=0;row<2;row++)for(let col=0;col<4;col++)
+    mesh.box(-buoySide*(col+.5)*.9,6.9+row*.75,-.06,.9,.75,.1,(row+col)%2?dark:white);
   return mesh;
 }
 

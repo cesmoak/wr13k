@@ -1,20 +1,26 @@
-import { readFile, writeFile, mkdir, rm, stat } from 'node:fs/promises';
-import { execFileSync } from 'node:child_process';
-import { resolve } from 'node:path';
+import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { deflateRawSync } from 'node:zlib';
+import { Script } from 'node:vm';
+import { readScripts, compactScript, packageHTML } from './optimize.mjs';
+import { zipHTML } from './zip.mjs';
+import { compactSelectors } from './selectors.mjs';
 
-// A deliberately narrow bundler for these dependency-free, ordered modules.
-// Source stays readable; size optimization belongs to the next pass.
-const modules=['math','course','boat-physics','interactions','simulation','attract','mesh','atmosphere','renderer','audio','presentation','main'];
-const sources=await Promise.all(modules.map(name=>readFile(`src/${name}.js`,'utf8')));
-const script=sources.map((source,i)=>`// ${modules[i]}.js\n${source.replace(/^export const gameState = .*;$/gm,'').replace(/^import .*?;\s*$/gm,'').replace(/^export /gm,'')}`).join('\n');
-let html=await readFile('index.html','utf8');
-const css=await readFile('style.css','utf8');
-html=html.replace('<link rel="stylesheet" href="style.css">',()=>`<style>${css}</style>`)
-  .replace('<script type="module" src="src/main.js"></script>',()=>`<script>(()=>{\n'use strict';\n${script}\n})();</script>`);
-await mkdir('dist',{recursive:true});await writeFile('dist/index.html',html);
-const zip=resolve('dist/sunwake-rush.zip');await rm(zip,{force:true});
-execFileSync('zip',['-X','-9','-j',zip,'dist/index.html'],{stdio:'pipe'});
-const bytes=(await stat(zip)).size;
-console.log(`Built dist/index.html (${Buffer.byteLength(html).toLocaleString()} bytes)`);
-console.log(`Packaged dist/sunwake-rush.zip (${bytes.toLocaleString()} bytes / ${(bytes/1024).toFixed(2)} KB)`);
-console.log('Playable-first build: the 13 KB competition limit is informational, not enforced.');
+const [source,html,css]=await Promise.all([readScripts(),readFile('index.html','utf8'),readFile('style.css','utf8')]);
+const candidates=[];
+for(const [name,options] of [['minified',{properties:false,shaders:false}],['shaders',{properties:false}],['properties',{}],['selectors',{}]]){
+  const input=name==='selectors'?compactSelectors(html,css,source):{html,css,source};
+  const js=await compactScript(`(()=>{'use strict';\n${input.source}\n})();`,options);new Script(js);
+  const packed=await packageHTML(input.html,input.css,js),archive=await zipHTML(packed);
+  candidates.push({name,html:packed,bytes:Buffer.byteLength(packed),deflate:deflateRawSync(packed,{level:9}).length,
+    cssBytes:Buffer.byteLength(packed.match(/<style>([\s\S]*?)<\/style>/)[1]),mapping:input.mapping,...archive});
+}
+const best=candidates.reduce((a,b)=>a.zip.length<b.zip.length?a:b),{zip,deflateSaving}=best;
+await mkdir('dist',{recursive:true});await writeFile('dist/index.html',best.html);await writeFile('dist/sunwake-rush.zip',zip);
+const report={selected:best.name,htmlBytes:best.bytes,zipBytes:zip.length,zopfliSaving:deflateSaving,
+  cssBytes:best.cssBytes,selectors:best.mapping??{},
+  candidates:candidates.map(({name,bytes,deflate,cssBytes,zip})=>({name,htmlBytes:bytes,cssBytes,deflateBytes:deflate,zipBytes:zip.length}))};
+await writeFile('dist/size-report.json',JSON.stringify(report,null,2)+'\n');
+console.table(report.candidates);
+console.log(`Built offline dist/index.html (${best.bytes.toLocaleString()} bytes)`);
+console.log(`ZIP: ${zip.length.toLocaleString()} bytes (${(zip.length/1024).toFixed(2)} KiB); stronger Deflate saved ${deflateSaving} bytes.`);
+console.log(`13 KiB target: ${zip.length<=13312?'met':`${zip.length-13312} bytes over (informational)`}.`);

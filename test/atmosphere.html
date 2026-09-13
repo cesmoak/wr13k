@@ -5,11 +5,11 @@
 import {Renderer} from '../src/renderer.js';
 import {createRace} from '../src/simulation.js';
 const renderer=new Renderer(document.querySelector('canvas')),race=createRace();
-race.phase='racing';renderer.lightMode='day';
+race.phase='racing';race.lightingCourse={...race.course,lighting:'day'};
 Object.assign(race.racers[0],{x:-105,y:1,z:-112,yaw:1.48,speed:0});
 renderer.eye=[-120,8,-114];
-document.querySelector('#day').onclick=()=>renderer.lightMode='day';
-document.querySelector('#night').onclick=()=>renderer.lightMode='night';
+document.querySelector('#day').onclick=()=>race.lightingCourse={...race.course,lighting:'day'};
+document.querySelector('#night').onclick=()=>race.lightingCourse={...race.course,lighting:'night'};
 document.querySelector('#turn').onclick=()=>{
  const p=race.racers[0];p.yaw+=Math.PI/6;renderer.cameraReady=false;
  renderer.eye=[p.x-Math.sin(p.yaw)*15,p.y+7.3,p.z-Math.cos(p.yaw)*15];
@@ -17,31 +17,34 @@ document.querySelector('#turn').onclick=()=>{
 let frozen=false,pending=false;
 document.querySelector('#pause').onclick=()=>frozen=!frozen;
 document.querySelector('#check').onclick=()=>pending=true;
-const normalFlare=renderer.drawSunFlare.bind(renderer);
-renderer.drawSunFlare=(width,height)=>{
+const normalFlare=renderer.drawLensFlare.bind(renderer);
+renderer.drawLensFlare=(width,height)=>{
  if(!pending){normalFlare(width,height);return;}
  pending=false;
  const gl=renderer.gl,light={...renderer.lighting},night=renderer.nightBlend,sunScreen=renderer.sunScreen;
  const read=(x,y)=>{const p=new Uint8Array(4);gl.readPixels(x,y,1,1,gl.RGBA,gl.UNSIGNED_BYTE,p);return p;};
- const sx=Math.round(.59*width),sy=Math.round(.61*height),probeX=Math.round(sx-width*.04);
+ const sx=Math.round(.59*width),sy=Math.round(.61*height);
+ // Sample the first lens ghost, not the removed warm sun bloom.
+ const probeX=Math.round((.18*.62*.5+.5)*width),probeY=Math.round((.22*.62*.5+.5)*height);
  renderer.lighting={altitude:1,twilight:0};renderer.nightBlend=0;renderer.sunScreen={x:.18,y:.22};
  // Control the source patch so this checks both visibility states regardless
  // of the scenery currently behind the sun. Readback is test-only.
  gl.enable(gl.SCISSOR_TEST);gl.scissor(sx-5,sy-5,11,11);gl.clearColor(1,1,.78,1);gl.clear(gl.COLOR_BUFFER_BIT);gl.disable(gl.SCISSOR_TEST);
- const before=read(probeX,sy);normalFlare(width,height);const visible=read(probeX,sy);
+ const before=read(probeX,probeY),sunBefore=read(sx,sy);normalFlare(width,height);const visible=read(probeX,probeY),sunAfter=read(sx,sy);
  gl.enable(gl.SCISSOR_TEST);gl.scissor(sx-5,sy-5,11,11);gl.clearColor(0,0,0,1);gl.clear(gl.COLOR_BUFFER_BIT);gl.disable(gl.SCISSOR_TEST);
- normalFlare(width,height);const hidden=read(probeX,sy);
+ normalFlare(width,height);const hidden=read(probeX,probeY);
  renderer.nightBlend=1;renderer.lighting.altitude=-1;
- normalFlare(width,height);const moon=read(probeX,sy);
+ normalFlare(width,height);const moon=read(probeX,probeY);
  renderer.nightBlend=0;renderer.lighting.altitude=1;renderer.sunScreen=null;
- normalFlare(width,height);const behind=read(probeX,sy);
- renderer.sunScreen={x:1.5,y:.64};normalFlare(width,height);const outside=read(probeX,sy);
+ normalFlare(width,height);const behind=read(probeX,probeY);
+ renderer.sunScreen={x:1.5,y:.64};normalFlare(width,height);const outside=read(probeX,probeY);
  renderer.lighting=light;renderer.nightBlend=night;renderer.sunScreen=sunScreen;
  const same=(a,b)=>a.every((v,i)=>v===b[i]);
  document.querySelector('#report').textContent=[
   `${visible.some((v,i)=>i<3&&v>before[i])?'PASS':'FAIL'} visible sun adds flare`,
+  `${same(sunBefore,sunAfter)?'PASS':'FAIL'} sun center has no added bloom`,
   `${same(visible,hidden)?'PASS':'FAIL'} covered sun suppresses flare`,
-  `${same(hidden,moon)?'PASS':'FAIL'} night suppresses sun flare`,
+  `${same(hidden,moon)?'PASS':'FAIL'} night suppresses lens flare`,
   `${same(moon,behind)&&same(behind,outside)?'PASS':'FAIL'} behind-camera and offscreen sun suppress flare`,
   `${gl.getError()===0?'PASS':'FAIL'} no WebGL errors`
  ].join('\n');

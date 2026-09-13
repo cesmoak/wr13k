@@ -9,5 +9,12 @@
     "preview": "node scripts/serve.mjs dist",
     "check:size": "node scripts/size.mjs",
     "test": "node --test test/*.test.js"
+  },
+  "devDependencies": {
+    "@gfx/zopfli": "1.0.15",
+    "acorn": "8.18.0",
+    "clean-css": "5.3.3",
+    "html-minifier-terser": "7.2.0",
+    "terser": "5.51.2"
   }
 }

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {COURSES,LIGHTHOUSE} from '../src/course.js';
 import {createTitleRace,stepTitleRace} from '../src/attract.js';
 import {createRace,startRace} from '../src/simulation.js';
-import {titleCamera} from '../src/renderer.js';
+import {TITLE_CAMERA} from '../src/renderer.js';
 import {lookAt,perspective,multiply} from '../src/math.js';
 
 test('every title mode previews four moving riders on the selected route; free uses main',()=>{
@@ -28,36 +28,36 @@ test('finished title riders continue from their current position without a grid 
   assert.ok(Math.hypot(r.x-x,r.z-z)<2);
 });
 
-test('main, reverse and free title packs begin in the visible channel; free hides markers',()=>{
-  for(const id of ['main','reverse','free']){
-    const demo=createTitleRace(COURSES[id]),camera=titleCamera(demo.worldTime);
-    const m=multiply(perspective(.99,1.2,.25,1300),lookAt(camera.eye,camera.target));
+test('every title pack uses the normal course-zero grid; free hides markers',()=>{
+  for(const id of Object.keys(COURSES)){
+    const demo=createTitleRace(COURSES[id]),grid=createRace(id==='free'?'main':id);
     for(const r of demo.racers){
-      const p=[r.x,r.y,r.z,1],q=[0,1,2,3].map(row=>p.reduce((sum,v,i)=>sum+v*m[i*4+row],0));
-      const x=(q[0]/q[3]+1)/2,y=(1-q[1]/q[3])/2;
-      assert.ok(x>.42&&x<.8&&y>.45&&y<.7,'Rider is in view beyond the menu');
-      assert.ok(r.x>155&&r.x<200&&r.z> -25&&r.z<85,'Pack starts in the exposed channel');
+      const start=grid.racers[r.id];
+      assert.deepEqual([r.x,r.z,r.yaw],[start.x,start.z,start.yaw]);
+      assert.equal(r.nextGate,0);assert.equal(r.passed,0);assert.equal(r.lap,1);
+      assert.equal(r.speed,0,'No custom velocity or warm-up simulation');
     }
     assert.equal(demo.hideCourseMarkers,id==='free');
     if(id==='free')assert.equal(demo.buoys.length,0);
   }
 });
 
-test('changing title courses preserves camera, lighthouse and water time',()=>{
+test('changing title courses preserves lighthouse and water time',()=>{
   let demo=createTitleRace(COURSES.main);
   for(let i=0;i<600;i++)stepTitleRace(demo,1/60);
   for(const course of Object.values(COURSES)){
-    const time=demo.worldTime,camera=titleCamera(time);
+    const time=demo.worldTime;
     demo=createTitleRace(course,time);
     assert.equal(demo.worldTime,time);
-    assert.deepEqual(titleCamera(demo.worldTime),camera);
-    assert.ok(demo.racers.every(r=>r.speed>0));
+    assert.ok(demo.racers.every(r=>r.speed===0));
+    stepTitleRace(demo,1/60);
+    assert.ok(demo.racers.every(r=>r.speed>0),'The shared grid accelerates immediately');
   }
 });
 
-test('gently moving title camera keeps the lighthouse on the right at desktop aspect ratios',()=>{
-  for(const aspect of [1.2,16/9,21/9])for(let time=0;time<160;time+=5){
-    const c=titleCamera(time),m=multiply(perspective(.99,aspect,.25,1300),lookAt(c.eye,c.target));
+test('fixed title camera keeps the lighthouse on the right at desktop aspect ratios',()=>{
+  for(const aspect of [1.2,16/9,21/9]){
+    const c=TITLE_CAMERA,m=multiply(perspective(.99,aspect,.25,1300),lookAt(c.eye,c.target));
     const p=[LIGHTHOUSE.x,LIGHTHOUSE.y+LIGHTHOUSE.lampHeight,LIGHTHOUSE.z,1];
     const q=[0,1,2,3].map(row=>p.reduce((sum,v,i)=>sum+v*m[i*4+row],0));
     const x=(q[0]/q[3]+1)/2,y=(1-q[1]/q[3])/2;

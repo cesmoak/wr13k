@@ -1,4 +1,4 @@
-import { clamp, modelMatrix } from './math.js';
+import { clamp, modelMatrix, DEVELOPMENT } from './math.js';
 import { waveHeight, sampleWater } from './course.js';
 
 // Inspired by fnport's primary hull contacts + secondary rider solver, not
@@ -19,7 +19,8 @@ const HULL_DAMPING = 16;
 
 export function newBoatState() {
   return { yawRate: 0, pitchRate: 0, rollRate: 0, contactFraction: 1,
-    waterForce: 0, landingImpact: 0, waterImpact: 0, splashCooldown: 0, contactPoints: [], acceleration: { x: 0, y: 0, z: 0 },
+    waterImpact: 0, splashCooldown: 0,
+    ...(DEVELOPMENT ? {waterForce: 0, landingImpact: 0, contactPoints: []} : {}),
     rider: { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, pitch: 0, roll: 0, pitchRate: 0, rollRate: 0,
       handlePitch:0,handlePitchRate:0,handleYaw:0,handleYawRate:0 }, wakeClock: 0 };
 }
@@ -84,14 +85,14 @@ export function springRider(r, ax, ay, az, dt) {
 
 export function stepBoat(r, input, dt, time, wakes = [], water = sampleWater, moored = false) {
   const steps = Math.max(1, Math.ceil(dt / (1 / 240))), h = dt / steps;
-  r.landingImpact = Math.max(0, r.landingImpact - dt * 12);
+  if(DEVELOPMENT)r.landingImpact = Math.max(0, r.landingImpact - dt * 12);
   r.waterImpact = 0;
-  const startVelocity = [r.vx, r.vy, r.vz], power = speedMultiplier(r);
+  const power = speedMultiplier(r);
   for (let step = 0; step < steps; step++) {
     const now = time - dt + (step + 1) * h, matrix = modelMatrix(0, 0, 0, r.yaw, r.pitch, r.roll);
     const s = Math.sin(r.yaw), c = Math.cos(r.yaw);
     let fx = 0, fy = -GRAVITY, fz = 0, pitchTorque = 0, rollTorque = 0, wet = 0;
-    const contacts = [];
+    const contacts = DEVELOPMENT ? [] : null;
     for (const [x, y, z] of HULL_CONTACTS) {
       const rx = matrix[0] * x + matrix[4] * y + matrix[8] * z;
       const ry = matrix[1] * x + matrix[5] * y + matrix[9] * z;
@@ -112,7 +113,7 @@ export function stepBoat(r, input, dt, time, wakes = [], water = sampleWater, mo
         const closing = pvx * surface.nx + pvy * surface.ny + pvz * surface.nz;
         force = clamp((HULL_SPRING * depth * surface.ny - HULL_DAMPING * closing) / HULL_CONTACTS.length, 0, 38);
         if (r.airborne) {
-          r.landingImpact = Math.max(r.landingImpact, -closing);
+          if(DEVELOPMENT)r.landingImpact = Math.max(r.landingImpact, -closing);
           // Preserve fresh contact across substeps separately from rider recoil.
           r.waterImpact = Math.max(r.waterImpact, -closing);
         }
@@ -122,11 +123,11 @@ export function stepBoat(r, input, dt, time, wakes = [], water = sampleWater, mo
         pitchTorque += tx * c - tz * s;
         rollTorque += tx * matrix[8] + ty * matrix[9] + tz * matrix[10];
       }
-      contacts.push({ x: r.x + rx, y: r.y + ry, z: r.z + rz, depth, force });
+      if(DEVELOPMENT)contacts.push({ x: r.x + rx, y: r.y + ry, z: r.z + rz, depth, force });
     }
     r.contactFraction = wet / HULL_CONTACTS.length;
-    r.waterForce = fy + GRAVITY;
-    r.contactPoints = contacts;
+    if(DEVELOPMENT)r.waterForce = fy + GRAVITY;
+    if(DEVELOPMENT)r.contactPoints = contacts;
     r.airborne = wet === 0;
     const contact = r.contactFraction;
     // Bleed off fast upward rebound while the hull is still in the water.
@@ -172,7 +173,6 @@ export function stepBoat(r, input, dt, time, wakes = [], water = sampleWater, mo
     }
     springRider(r, moored ? 0 : fx, fy, moored ? 0 : fz, h);
   }
-  r.acceleration = { x: (r.vx - startVelocity[0]) / dt, y: (r.vy - startVelocity[1]) / dt, z: (r.vz - startVelocity[2]) / dt };
 }
 
 // Two-link constraints keep hands on the handlebar and feet on the deck.

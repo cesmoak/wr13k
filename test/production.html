@@ -1,0 +1,46 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Production build checks</title>
+<style>body{margin:0;background:#203f3c;color:#fff;font:13px monospace}header{padding:12px;display:flex;gap:20px}button{padding:10px}iframe{width:100%;height:85vh;border:0}#report{white-space:pre-wrap}</style>
+<header><button id="run">Check packed game</button><span id="report">Ready — checks the actual dist/index.html, with no debug state.</span></header>
+<iframe id="frame" src="../dist/index.html" title="Packed game"></iframe>
+<script type="module">
+const frame=document.querySelector('#frame'),report=document.querySelector('#report'),run=document.querySelector('#run');
+const manifest=fetch('../dist/size-report.json').then(response=>response.json());
+const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+run.onclick=async()=>{
+  run.disabled=true;let checks=0;const errors=[];
+  const {selectors={}}=await manifest;
+  const w=frame.contentWindow,d=frame.contentDocument,$=id=>d.getElementById(selectors[id]??id);
+  w.addEventListener('error',e=>errors.push(e.message));
+  const check=(ok,label)=>{if(!ok)throw Error(label);checks++;report.textContent=`${checks} passed · ${label}`;};
+  const key=(code,type='keydown')=>w.dispatchEvent(new w.KeyboardEvent(type,{code,bubbles:true}));
+  try{
+    for(const mode of ['free','main','reverse','rocky','sunrise']){
+      check(!$('title-screen').hidden,`${mode}: title menu`);
+      d.querySelector(`[data-course="${mode}"]`).click();await wait(120);
+      check(d.querySelector(`[data-course="${mode}"]`).getAttribute('aria-pressed')==='true',`${mode}: selection`);
+      $('start').click();await wait(mode==='free'?200:3900);
+      check(!$('hud').hidden&&$('title-screen').hidden,`${mode}: race starts`);
+      key('KeyW');await wait(650);key('KeyW','keyup');
+      check(Number($('speed').textContent)>0,`${mode}: throttle moves the craft`);
+      key('Escape');key('Escape','keyup');await wait(80);
+      check(!$('pause-screen').hidden,`${mode}: pause`);
+      const timer=$('timer').textContent;await wait(150);
+      check($('timer').textContent===timer,`${mode}: paused timer stays fixed`);
+      $('resume').click();await wait(80);
+      check($('pause-screen').hidden,`${mode}: resume`);
+      w.dispatchEvent(new w.Event('blur'));await wait(80);
+      check(!$('pause-screen').hidden,`${mode}: focus loss pauses`);
+      const pausedTime=$('timer').textContent;
+      key('KeyR');key('KeyR','keyup');key('Enter');key('Enter','keyup');await wait(80);
+      check(!$('pause-screen').hidden&&$('timer').textContent===pausedTime,`${mode}: removed restart shortcuts do nothing`);
+      const gl=$('game').getContext('webgl');
+      check(gl&&!gl.isContextLost()&&gl.getError()===0,`${mode}: WebGL and startup healthy`);
+      $('course-menu').click();await wait(80);
+    }
+    check(errors.length===0,`no runtime errors: ${errors.join(', ')}`);
+    check(w.performance.getEntriesByType('resource').length===0,'packed document makes zero subresource requests');
+    report.textContent=`PASS — ${checks} checks across all five packed modes. No runtime/WebGL errors or subresource requests.`;
+  }catch(error){report.textContent=`FAIL after ${checks} checks: ${error.message}`;}
+  finally{run.disabled=false;}
+};
+</script></html>

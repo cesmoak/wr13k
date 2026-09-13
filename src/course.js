@@ -29,8 +29,9 @@ function splinePoint(t,points) {
   const spline=axis=>.5*(2*b[axis]+(-a[axis]+c[axis])*f+(2*a[axis]-5*b[axis]+4*c[axis]-d[axis])*f*f+(-a[axis]+3*b[axis]-3*c[axis]+d[axis])*f*f*f);
   return {x:spline(0),z:spline(1)};
 }
-function buildCourse(id,name,description,points,stations,difficulty='rocky') {
-  const course={id,name,description,points,freePlay:id==='free',
+function buildCourse(id,name,points,stations,difficulty='rocky') {
+  const course={id,name,points,freePlay:id==='free',
+    progressCenter:id==='sunrise'?[290,-90]:id==='rocky'?[140,-130]:[0,0],
     lighting:{free:'cycle',main:'day',reverse:'sunset',rocky:'night',sunrise:'sunrise'}[id],
     aiSkill:{free:0,main:0,reverse:1,rocky:2,sunrise:2}[id]};
   course.samples=Array.from({length:240},(_,i)=>splinePoint(i/240,points));
@@ -43,7 +44,7 @@ function buildCourse(id,name,description,points,stations,difficulty='rocky') {
     const width=reef?12:difficulty==='easy'?(channel?14:index?22:18):difficulty==='hard'?(channel?12:14):18;
     const offset=difficulty==='reef'?0:index?-side*(channel?(difficulty==='rocky'?2:1):slalom?(difficulty==='hard'?20:22):difficulty==='rocky'?7:0):0;
     const x=p.x+tangent.z*offset,z=p.z-tangent.x*offset;
-    return {x,z,tangent,index,t,side,width,slalom,channel,offshore:difficulty==='reef'?z< -130:difficulty==='rocky'&&index>=2&&index<=8,
+    return {x,z,tangent,index,side,width,slalom,channel,offshore:difficulty==='reef'?z< -130:difficulty==='rocky'&&index>=2&&index<=8,
       buoy:{x:x+tangent.z*side*width,z:z-tangent.x*side*width}};
   });
   course.bounds={
@@ -62,11 +63,11 @@ const sunriseRoute=[[180,0],[190,70],[240,125],[315,125],[365,70],[419,0],
   [383,-70],[431,-140],[440,-220],[393,-291],[325,-305],[257,-250],[240,-190],
   [222,-140],[184,-92],[180,-40]];
 export const COURSES={
-  free:buildCourse('free','Free play','Changing skies · explore three islands · no race or buoys.',mainRoute,[],'easy'),
-  main:buildCourse('main','Main island loop','Daylight · clockwise · easy buoys · 3 laps.',mainRoute,Array.from({length:10},(_,i)=>i*1.2),'easy'),
-  reverse:buildCourse('reverse','Main island reverse','Sunset to dusk · tight reverse slalom · strong rivals · 3 laps.',reverseRoute,Array.from({length:16},(_,i)=>i*.75),'hard'),
-  rocky:buildCourse('rocky','Rocky island loop','Night · choppy offshore seas · expert rivals · 3 laps.',route,buoyStations),
-  sunrise:buildCourse('sunrise','Sunrise reef loop','Dawn to daylight · dodge the outer reef · 3 laps.',sunriseRoute,[0,1,2,2.5,3,4,5,6,7,8,9,9.5,10,11,12,13,14,15],'reef')
+  free:buildCourse('free','Free play',mainRoute,[],'easy'),
+  main:buildCourse('main','Main island loop',mainRoute,Array.from({length:10},(_,i)=>i*1.2),'easy'),
+  reverse:buildCourse('reverse','Main island reverse',reverseRoute,Array.from({length:16},(_,i)=>i*.75),'hard'),
+  rocky:buildCourse('rocky','Rocky island loop',route,buoyStations),
+  sunrise:buildCourse('sunrise','Sunrise reef loop',sunriseRoute,[0,1,2,2.5,3,4,5,6,7,8,9,9.5,10,11,12,13,14,15],'reef')
 };
 export function coursePoint(t,course=COURSES.rocky){return splinePoint(t,course.points);}
 export function courseTangent(t,course=COURSES.rocky){
@@ -133,14 +134,6 @@ export function sampleWater(x, z, time, wakes = []) {
 export function shoreRadius(angle) {
   return 1 + Math.sin(angle * 5) * .045 + Math.cos(angle * 7) * .028;
 }
-export function nearestCourse(x, z, course=COURSES.rocky) {
-  let best = Infinity, index = 0;
-  course.samples.forEach((p, i) => {
-    const d = Math.hypot(p.x - x, p.z - z);
-    if (d < best) { best = d; index = i; }
-  });
-  return { distance: best, index };
-}
 
 
 // A shallow sandy shelf slopes continuously away from each generated shore.
@@ -154,16 +147,11 @@ export function seabedHeight(x,z) {
 }
 
 
-// Project onto the closed circuit, including the final segment across the seam.
-// Continuous progress keeps the sky smooth between sampled course points.
+// Lighting only needs an angular estimate, anchored to the starting line.
+// Race checkpoints and standings do not use this approximation.
 export function courseProgress(x,z,course=COURSES.rocky) {
-  const courseSamples=course.samples;
-  let best=Infinity,progress=0;
-  for(let i=0;i<courseSamples.length;i++){
-    const a=courseSamples[i],b=courseSamples[(i+1)%courseSamples.length],dx=b.x-a.x,dz=b.z-a.z;
-    const f=Math.max(0,Math.min(1,((x-a.x)*dx+(z-a.z)*dz)/(dx*dx+dz*dz)));
-    const distance=(x-a.x-dx*f)**2+(z-a.z-dz*f)**2;
-    if(distance<best){best=distance;progress=(i+f)/courseSamples.length;}
-  }
-  return progress%1;
+  const [cx,cz]=course.progressCenter,[sx,sz]=course.points[0];
+  const angle=Math.atan2(z-cz,x-cx)-Math.atan2(sz-cz,sx-cx);
+  const direction=course.id==='reverse'||course.id==='sunrise'?-1:1;
+  return (angle*direction/(Math.PI*2)%1+1)%1;
 }

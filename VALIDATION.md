@@ -1,5 +1,92 @@
 # First-pass validation
 
+## Remove redundant HUD text and unused metadata
+
+- Removed the off-course warning, timer, nearest-course helper (including unused index), and its repeated scans. Removed speed-level popups, the shared notice element/styles, leaderboard YOU/AI badges and their styles, results filler, hidden DNF branch, and Space-key suppression. The existing speed gauge and synthesized cues remain.
+- Removed stored buoy `t` and lighting label/returned-progress fields. Lighting still uses angular progress internally; tests now verify actual altitude/night transitions and lap continuity. The unread camera target was already removed in the previous change.
+- All 88 automated tests and 52 packed-game browser checks pass, with no runtime/WebGL errors or subresource requests. Rebuilt ZIP: **27,064 → 26,645 bytes**, saving **419 bytes**. Built CSS: **6,185 bytes**.
+
+## Fixed title camera and camera cleanup
+
+- Replaced the time-driven title orbit with a fixed view at its previous opening position: eye `[255.85,39.92,329.53]`, target `[125,0,-90]`. Course changes preserve that framing while scenery and lighting continue animating.
+- Removed the unread camera-target property, overwritten constructor eye/yaw defaults, and the missing-velocity fallback used only by incomplete test hulls. The race camera retains speed-based distance/height, forward-motion heading follow, turn-rate limiting, and stable vertical pitch.
+- All 88 automated tests and 36 browser mode checks pass, including fixed camera positions across course changes, clean race starts, smooth chase behavior, and lighthouse framing above the horizon at three desktop aspect ratios.
+- ZIP: **27,138 → 27,064 bytes**, saving 74 bytes.
+
+## Remove sound and lighting shortcuts
+
+- Removed M/N handlers, mute state and toggle method, and the manual lighting mode parameter/state/branches. Audio starts through the existing start interaction; lighting always follows the course profile.
+- Updated browser fixtures and documentation. Lighting fixtures use course profiles directly, and obsolete mute controls/checks are removed.
+- All 88 automated tests pass; six updated browser fixtures pass script parsing. Production builds successfully. ZIP: **27,280 → 27,138 bytes**, saving 142 bytes.
+
+## Angular lighting progress
+
+- Replaced the 240-segment nearest-path search with an angle around a course-specific center, relative to the starting line and corrected for travel direction. This is a lighting approximation only; checkpoints, laps, standings, and AI retain their existing logic.
+- All 88 automated tests pass, including dense three-lap sunset/sunrise continuity checks, lap seams, radial position independence, fixed day/night settings, and the time-driven free-play cycle.
+- Rebuilt ZIP: **27,289 → 27,280 bytes**, saving 9 bytes. The primary benefit is constant-time lighting progress evaluation.
+
+## Remove level descriptions
+
+- Removed all five course descriptions and their constructor parameter. The development course preview displays the course name instead; production metadata stripping now matches the simpler constructor.
+- All 86 automated tests pass. Rebuilt HTML and ZIP are byte-for-byte identical to the previous build: descriptions were already stripped from production. ZIP remains **27,289 bytes**.
+
+## Shared title-race starting grid
+
+- Every title preview reuses the normal starting grid near course point 0. Removed course-specific entry positions, custom lane/heading/velocity placement, checkpoint lookup/progress setup, and three seconds of warm-up simulation. Riders accelerate through the regular AI/physics path.
+- Free play still previews the main course without markers. Course changes preserve camera, lighthouse, and water time; hull heights are aligned to that water time at initialization.
+- All 86 automated tests and 36 browser mode/title checks pass, including shared grid/progress state, moving riders on every route, clean game starts, and continuous scenery clocks. ZIP integrity and whitespace checks pass.
+- ZIP: **27,456 → 27,289 bytes**, saving 167 bytes.
+
+## Remove restart and keyboard hints
+
+- Removed R-to-restart and Enter-to-retry on finished/lost races. The start handler only accepts the title phase; beginning another race requires Courses → Start. Escape pause/resume remains.
+- Removed the keyboard-hint footer, its keycap/responsive styles, and the restart instruction from the off-course notice.
+- All 86 automated tests and 52 packed-game checks pass. Fifteen speed/loss browser checks confirm R/Enter leave the loss screen unchanged and Courses → Start creates a fresh race. Static checks confirm no restart binding or hint markup/styles remain, and DOM references and ZIP integrity pass.
+- ZIP: **27,589 → 27,456 bytes**, saving 133 bytes; built CSS is 6,451 bytes.
+
+## Remove error UI and warm sun flare
+
+- Deleted the graphics error panel, startup catch/display path, context-loss reload handler, and redundant renderer-availability branches. Detailed WebGL/shader diagnostics remain in development and are compiled out of production.
+- Removed the sun's warm sky glow, bloom, starburst rays, and horizontal streak. Retained the sun disc, rainbow lens halo, six internal reflections, opposite-axis rainbow ring, and visibility/angle/night attenuation. Updated lens occlusion's expected source color to match the sun without added glow.
+- ZIP: **28,041 → 27,591 bytes**, saving 450 bytes. All 86 automated tests and 52 packed-game checks pass. Six GPU/browser checks confirm visible lens reflections, no added bloom at the sun center, and suppression for covered, nighttime, behind-camera, and offscreen sources, with no WebGL errors.
+- Static DOM references and archive integrity pass; production contains neither the removed error flow nor development shader diagnostics.
+
+## Minimal game UI
+
+- Removed favicon markup, ARIA labels and their runtime updates, in-race game branding/map header/caption, pause button, menu restart/retry buttons, decorative reload arrow, and countdown slogans. The title-menu heading remains. Countdown is now a single text element showing numbers/GO; Escape and R remain the pause/restart controls.
+- UI styling uses one generic sans-serif family and rounded #rgb/#rgba colors. Procedural model/water colors are unchanged. Removed styles and DOM handlers belonging to deleted elements; the build now also removes unused course-name metadata. Remaining hidden HUD/countdown/pause/results/error panels are all active states.
+- ZIP: **28,762 → 28,041 bytes**, saving 721 bytes. Built CSS: **6,823 bytes**. All 86 automated tests, 52 packed-game checks, and 80 source/packed layout comparisons pass. The 14 buoy-speed/loss browser checks confirm the loss screen, frozen simulation, and R-key restart after removing Retry.
+- Every static main.js DOM lookup resolves; archive integrity and whitespace checks pass. Favicon markup is unnecessary for gameplay; browsers may independently request a default icon.
+
+## CSS cleanup and production selector renaming
+
+- Removed unused eyebrow/modal helper rules and obsolete title/menu declarations that later rules override. Source class and ID names remain readable; the build tries shorter names across styles, markup, DOM lookups, class toggles, and generated leaderboard/results markup.
+- The build now measures every candidate's final Zopfli ZIP and selects the smallest actual archive. The development size report includes CSS sizes and the selected identifier map, which is not shipped in the ZIP.
+- Built CSS: **9,766 → 7,739 bytes**. ZIP: **29,308 → 28,762 bytes**, saving 546 bytes (194 from cleanup and another 352 from coordinated selector renaming).
+- All 86 automated tests pass. A browser comparison against the pre-cleanup stylesheet passed 80 layouts across four viewport sizes, day/night, free play, title, HUD, pause, results, and error screens, including pseudo-elements. Equivalent zero lengths from CSS minification are normalized for comparison.
+- All 52 packed-game checks pass across five modes, with no game runtime/WebGL errors or subresource requests. ZIP integrity and diff whitespace checks pass.
+
+## Redundant source cleanup
+
+- Simplified the player-only preview controller after the opponent early return; removed unused imports and the unread acceleration diagnostic/capture; flattened the single-buoy mesh loop; removed `.stamp-top`, `.wide`, `h1 i`, and `.course-menu small` styles.
+- Before/after comparisons matched AI inputs across every course, racer, and sampled speed/heading, and matched every buoy's generated vertices for both sides and highlight states exactly. All 85 automated tests and ZIP integrity checks pass.
+- ZIP reduced from 29,426 to **29,308 bytes**, saving 118 more bytes. The removed imports and acceleration diagnostic were already absent from production; their removal improves source clarity without additional ZIP savings.
+
+## Build-only metadata removal
+
+- Removed production-only page description/theme metadata, favicon artwork, and the browser-title tagline. Retained charset, viewport, accessible control names, and menu selection attributes. An empty favicon data URL prevents a fallback network request.
+- The build removes unused course descriptions and checkpoint metadata (`slalom`, `offshore`, duplicate `buoy` coordinates), plus the spray diagnostic tag. Runtime course fields and procedural item counts are unchanged; source fixtures keep their metadata. The transform rejects direct runtime reads of stripped fields to catch future dependencies.
+- ZIP: **29,426 bytes**, saving another 451 bytes from 29,877. All 85 automated tests and archive integrity checks pass, including exact source/production simulation and generated-geometry parity.
+- All 52 packed-game browser checks pass across five modes, with no game runtime/WebGL errors or subresource requests.
+
+## Production size pass
+
+- ZIP reduced from 44,374 to **29,877 bytes (29.18 KiB)**: 14,497 bytes / 32.7% saved. Packed HTML reduced from 134,325 to 80,703 bytes. Still 16,565 bytes above the eventual 13 KiB target.
+- Added build-only JS/HTML/CSS minification, shader whitespace/interface compaction, an explicit internal-property rename list, development diagnostic stripping, and deterministic Zopfli ZIP packaging. Removed unused styles, the unused projection helper, and redundant initial course-mesh allocation. No gameplay, scenery counts, simulation steps, or visual-effect budgets were reduced.
+- All 84 Node tests passed. After correcting the production diagnostic flag, both production tests passed again: exact source/minified simulation, checkpoint, interpolation, and generated-geometry parity; plus deterministic Unicode ZIP round-trip. Existing simulations verify all race courses finish reliably.
+- The actual minified package passed 52 browser checks across all five modes: course selection, throttle, pause/resume, focus loss, restart, WebGL health, no runtime errors, and zero subresource requests. Inspected day and night rendering and menu/HUD layouts in the in-app browser. Chrome and Safari were not separately rechecked for this size pass.
+- Archive integrity passed using `unzip -t`; the ZIP contains only `index.html`. Build dependencies and test fixtures are excluded. `dist/size-report.json` records the measured compression candidates.
+
 ## Sunrise reef loop
 
 - Added six procedural reef outcrops between the smaller sandy island and the lighthouse, sharing collision, shallow-water shading, seabed, and minimap geometry. An opening preserves the original offshore route.

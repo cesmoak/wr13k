@@ -26,13 +26,13 @@ export function shoreSurf(racer,time){
 }
 
 export class RaceAudio {
-  constructor(){this.context=null;this.muted=false;}
+  constructor(){this.context=null;}
   async unlock(){
     if(!this.context){
       const AudioContext=window.AudioContext||window.webkitAudioContext;
       if(!AudioContext)return;
       const ctx=this.context=new AudioContext();
-      this.master=ctx.createGain();this.master.gain.value=this.muted?0:.45;this.master.connect(ctx.destination);
+      this.master=ctx.createGain();this.master.gain.value=.45;this.master.connect(ctx.destination);
       this.engine=ctx.createOscillator();this.engine.type='sawtooth';
       const filter=ctx.createBiquadFilter();filter.type='lowpass';filter.frequency.value=350;
       this.engineGain=ctx.createGain();this.engineGain.gain.value=0;
@@ -65,9 +65,8 @@ export class RaceAudio {
     }
     if(this.context.state==='suspended')await this.context.resume();
   }
-  toggle(){this.muted=!this.muted;if(this.context)this.master.gain.setTargetAtTime(this.muted?0:.45,this.context.currentTime,.04);return this.muted;}
   tone(frequency,duration=.16,delay=0,shape='sine',endFrequency=frequency,volume=.22){
-    if(!this.context||this.muted)return;
+    if(!this.context)return;
     const ctx=this.context,t=ctx.currentTime+delay,osc=ctx.createOscillator(),gain=ctx.createGain();
     osc.type=shape;osc.frequency.setValueAtTime(frequency,t);
     osc.frequency.exponentialRampToValueAtTime(endFrequency,t+duration);gain.gain.setValueAtTime(0,t);
@@ -98,7 +97,7 @@ export class RaceAudio {
     if(event.type==='lose')[330,247,165,110].forEach((f,i)=>this.tone(f,.35,i*.16));
   }
   splash(impact){
-    if(!this.context||this.muted)return;
+    if(!this.context)return;
     const ctx=this.context,t=ctx.currentTime;
     // Reserve the loud, bright wash for hard landings; small contacts stay subtle.
     const strength=Math.min(1,Math.max(0,(impact-1.5)/14.5))**2;
@@ -116,7 +115,7 @@ export class RaceAudio {
     noise.onended=()=>{noise.disconnect();filter.disconnect();gain.disconnect();};
   }
   seagull(){
-    if(!this.context||this.muted)return;
+    if(!this.context)return;
     const ctx=this.context,duration=.85,buffer=ctx.createBuffer(1,Math.ceil(ctx.sampleRate*duration),ctx.sampleRate);
     const data=buffer.getChannelData(0),pitch=.85+Math.random()*.3;
     let phase=0;

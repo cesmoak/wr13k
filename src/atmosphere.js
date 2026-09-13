@@ -1,4 +1,4 @@
-import { TAU, modelMatrix } from './math.js';
+import { modelMatrix } from './math.js';
 import { MeshBuilder } from './mesh.js';
 
 // Small, deterministic flocks orbit the shores. Animation uses simulation time,

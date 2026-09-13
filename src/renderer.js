@@ -1,14 +1,13 @@
-import { clamp, lerp, angleDelta, multiply, perspective, lookAt, modelMatrix, randomSeed } from './math.js';
-import { gates, waveHeight, MAX_WAKES, WAVE_SCALE, WAVE_SPACING, WAVE_LAYERS, islands, landforms, RAINBOW_COLORS, LIGHTHOUSE, courseProgress, OFFSHORE_SEA, COURSES, LAPS } from './course.js';
-import { createBuoys } from './interactions.js';
+import { clamp, lerp, angleDelta, multiply, perspective, lookAt, modelMatrix, randomSeed, DEVELOPMENT } from './math.js';
+import { waveHeight, MAX_WAKES, WAVE_SCALE, WAVE_SPACING, WAVE_LAYERS, landforms, RAINBOW_COLORS, LIGHTHOUSE, courseProgress, OFFSHORE_SEA, COURSES, LAPS } from './course.js';
 import { MAX_SPEED_LEVEL } from './boat-physics.js';
 import { createSeagullMesh } from './atmosphere.js';
 import { MeshBuilder, rgb, createIslandMesh, createCraftMesh, createGateMesh, createRiderMesh, createRainbowMesh, createLighthouseMesh, createBeaconMesh, createSeabedMesh, createSeaGrassMesh, createFishMesh } from './mesh.js';
 
 // Each course has its own atmosphere; free exploration follows a four-minute day.
-export function courseLighting(x,z,mode='auto',racer={lap:1},course=COURSES.rocky,time=0) {
+export function courseLighting(x,z,racer={lap:1},course=COURSES.rocky,time=0) {
   let progress=courseProgress(x,z,course);
-  // Checkpoint state disambiguates the projection seam: the opening run-up
+  // Checkpoint state disambiguates the angular seam: the opening run-up
   // is morning, and approaching a lap line cannot rewind the sky early.
   if(racer.passed===0)progress=0;
   else if(racer.finishTime!=null)progress=1;
@@ -18,19 +17,14 @@ export function courseLighting(x,z,mode='auto',racer={lap:1},course=COURSES.rock
   }
   const lap=clamp(racer.lap||1,1,LAPS),raceProgress=(lap-1+progress)/LAPS;
   const phase=time*Math.PI*2/240,cycle=course.lighting==='cycle';
-  const automatic=cycle?Math.cos(phase):course.lighting==='day'?.8:
+  const altitude=cycle?Math.cos(phase):course.lighting==='day'?.8:
     course.lighting==='night'?-.8:course.lighting==='sunrise'?lerp(-.24,.65,raceProgress):lerp(.24,-.20,raceProgress);
-  const altitude=mode==='night'?-1:mode==='day'?1:automatic;
   const blend=clamp((.28-altitude)/.56,0,1),night=blend*blend*(3-2*blend);
   const twilight=Math.max(0,1-Math.abs(altitude)/.55)**2;
-  const label=mode!=='auto'?mode.toUpperCase():cycle?
-    (altitude>.28?'DAY':altitude<-.28?'NIGHT':Math.sin(phase)>=0?'SUNSET':'SUNRISE'):
-    course.lighting==='sunset'?(altitude<-.1?'DUSK':'SUNSET'):
-    course.lighting==='sunrise'?(altitude>.28?'DAY':'SUNRISE'):course.lighting.toUpperCase();
-  const azimuth=1.25+(cycle&&mode==='auto'?phase:(course.lighting==='sunrise'?-1:1)*Math.acos(altitude));
+  const azimuth=1.25+(cycle?phase:(course.lighting==='sunrise'?-1:1)*Math.acos(altitude));
   const elevation=altitude*.24,horizontal=Math.sqrt(1-elevation*elevation);
   const sunDirection=[Math.sin(azimuth)*horizontal,elevation,Math.cos(azimuth)*horizontal];
-  return {progress,altitude,night,twilight,label,sunDirection};
+  return {altitude,night,twilight,sunDirection};
 }
 
 export function easeTitleLighting(previous,target,dt){
@@ -56,7 +50,7 @@ export function projectSkyDirection(view,direction) {
 export function chaseCamera(state,racer,dt){
   const first=!state.cameraReady;
   if(first){state.cameraYaw=racer.yaw;state.cameraReady=true;}
-  const forward=racer.vx===undefined?racer.speed:Math.max(0,racer.vx*Math.sin(racer.yaw)+racer.vz*Math.cos(racer.yaw));
+  const forward=racer.vx*Math.sin(racer.yaw)+racer.vz*Math.cos(racer.yaw);
   const moving=clamp((forward-1)/35,0,1),turnFollow=moving*moving*(3-2*moving);
   const correction=angleDelta(racer.yaw,state.cameraYaw)*(1-Math.exp(-dt*1.15*turnFollow));
   state.cameraYaw+=clamp(correction,-dt*.7*turnFollow,dt*.7*turnFollow);
@@ -70,12 +64,8 @@ export function chaseCamera(state,racer,dt){
   return [x,height-Math.hypot(x-state.eye[0],z-state.eye[2])*.2,z];
 }
 
-export function titleCamera(time){
-  // A closer, lower orbit across the channel keeps the lighthouse to the right.
-  // Bounded arcs and a gentle dolly avoid cuts or following individual hull bobbing.
-  const a=(time+30)*.035,angle=.22+Math.sin(a)*.09,radius=425+Math.sin(a*.7)*20;
-  return {eye:[125+Math.sin(angle)*radius,38+Math.sin(a*.6)*3,-90+Math.cos(angle)*radius],target:[125,0,-90]};
-}
+// Freeze the former 30-second-offset orbit at its initial menu view.
+export const TITLE_CAMERA={eye:[255.85,39.92,329.53],target:[125,0,-90]};
 
 export function flareAlignment(sun,aspect){
   // Keep heading alignment tight while allowing a broader vertical range.
@@ -267,13 +257,12 @@ void main(){
  float moonDisc=(1.-smoothstep(.038,.041,moonDistance))*moonVisible;
  color=mix(color,mix(vec3(1.,.95,.76),vec3(1.,.55,.25),uTwilight),sunDisc);
  color=mix(color,vec3(.78,.87,1.),moonDisc);
- color+=vec3(.07,.055,.02)*exp(-sunDistance*10.)*sunVisible;
  color+=vec3(.035,.05,.09)*exp(-moonDistance*10.)*moonVisible;
  gl_FragColor=vec4(color,1.);}`;
 
 const flareFragment=`precision mediump float;
 varying vec2 vUv;uniform sampler2D uSource;uniform vec2 uSun;
-uniform float uAspect,uStrength,uTwilight,uNight;
+uniform float uAspect,uStrength,uTwilight;
 float visible(vec2 uv,vec3 source){return 1.-smoothstep(.09,.22,length(texture2D(uSource,uv).rgb-source));}
 vec3 spectrum(float t){return pow(.5+.5*cos(6.283185*(t+vec3(0.,-.333,.333))),vec3(2.2));}
 vec3 rainbowRing(float radius,float center,float width){
@@ -285,15 +274,10 @@ void main(){
  // A tiny copy of the rendered sun center provides GPU-only occlusion. Land,
  // craft and waves covering the bright disc suppress the whole lens effect.
  vec3 source=mix(vec3(1.,.95,.76),vec3(1.,.55,.25),uTwilight);
- source=clamp(source+vec3(.07,.055,.02),0.,1.);
  float mask=(visible(vec2(.5),source)+visible(vec2(.15,.5),source)+visible(vec2(.85,.5),source)+visible(vec2(.5,.15),source)+visible(vec2(.5,.85),source))*.2;
- vec2 uv=vUv*vec2(uAspect,1.),sun=uSun*vec2(uAspect,1.),p=uv-sun;
- float r=length(p),a=atan(p.y,p.x);
- float rays=pow(abs(cos(a*3.)),28.)*exp(-r*11.)*smoothstep(.055,.10,r);
- float streak=exp(-abs(p.y)*130.-abs(p.x)*6.)*.12;
- vec3 color=vec3(1.,.85,.62)*(exp(-r*7.)*.17+rays*.12+streak);
- // A visible spectrum around the sun: violet inside, red at the outer rim.
- color+=rainbowRing(r,.28,.16)*.42;
+ vec2 uv=vUv*vec2(uAspect,1.),sun=uSun*vec2(uAspect,1.);
+ // Keep the spectral lens halo, without the sun's warm bloom or starburst.
+ vec3 color=rainbowRing(length(uv-sun),.28,.16)*.42;
  // Internal lens reflections lie on the optical axis through the image center.
  // Different aperture sizes and spectral rims suggest coated camera elements.
  for(int i=0;i<6;i++){
@@ -318,7 +302,7 @@ export class Renderer {
   constructor(canvas) {
     this.canvas=canvas;
     this.gl=canvas.getContext('webgl',{antialias:true,alpha:false,powerPreference:'high-performance'});
-    if(!this.gl) throw Error('WebGL is unavailable. Please enable hardware acceleration or try another browser.');
+    if(DEVELOPMENT&&!this.gl) throw Error('WebGL is unavailable.');
     const gl=this.gl;
     this.program=this.makeProgram(vertexSource,fragmentSource);
     this.skyProgram=this.makeProgram(skyVertex,skyFragment);
@@ -331,29 +315,29 @@ export class Renderer {
     this.attr=['aPosition','aNormal','aColor'].map(k=>gl.getAttribLocation(this.program,k));
     this.skyBuffer=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,this.skyBuffer);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,3,-1,-1,3]),gl.STATIC_DRAW);
     this.island=this.upload(createIslandMesh());
-    this.rainbow=this.upload(createRainbowMesh());
+    this.rainbow=null;
     this.lighthouse=this.upload(createLighthouseMesh());this.beacon=this.upload(createBeaconMesh());
     const lamp=new MeshBuilder();lamp.sphere(0,0,0,2.6,2,2.6,rgb('#fff3cc'),12,6);this.lamp=this.upload(lamp);
-    this.lightMode='auto';this.nightBlend=0;this.lighting=courseLighting(0,0);
+    this.nightBlend=0;this.lighting=courseLighting(0,0);
     this.crafts=[0,1,2,3].map(i=>this.upload(createCraftMesh(i)));
-    this.gateMeshes=createBuoys().map(b=>this.upload(createGateMesh(b.gate,false,b.side)));
-    this.activeGates=createBuoys().map(b=>this.upload(createGateMesh(b.gate,true,b.side)));
+    this.gateMeshes=[];
+    this.activeGates=[];
     this.water=this.makeWater();this.seabed=this.upload(createSeabedMesh());this.seagrass=this.upload(createSeaGrassMesh());this.fishBuffer=gl.createBuffer();
     this.riderBuffer=gl.createBuffer();this.wakeUniforms=new Float32Array(MAX_WAKES*4);
     this.seagullBuffer=gl.createBuffer();
     this.shadowUniforms=new Float32Array(16);this.shadowStyle=new Float32Array(8);
     this.effectBuffer=gl.createBuffer();this.particles=[];this.rainbowColors=RAINBOW_COLORS.map(rgb);this.particleClock=0;this.random=randomSeed(83);
-    this.eye=[-40,18,-180];this.cameraYaw=Math.PI/2;this.cameraReady=false;
+    this.cameraReady=false;
     gl.enable(gl.DEPTH_TEST);
   }
   makeProgram(vs,fs){
     const gl=this.gl,p=gl.createProgram();
     for(const [type,source] of [[gl.VERTEX_SHADER,vs],[gl.FRAGMENT_SHADER,fs]]) {
       const shader=gl.createShader(type);gl.shaderSource(shader,source);gl.compileShader(shader);
-      if(!gl.getShaderParameter(shader,gl.COMPILE_STATUS)) throw Error(gl.getShaderInfoLog(shader));
+      if(DEVELOPMENT&&!gl.getShaderParameter(shader,gl.COMPILE_STATUS)) throw Error(gl.getShaderInfoLog(shader));
       gl.attachShader(p,shader);
     }
-    gl.linkProgram(p);if(!gl.getProgramParameter(p,gl.LINK_STATUS)) throw Error(gl.getProgramInfoLog(p));return p;
+    gl.linkProgram(p);if(DEVELOPMENT&&!gl.getProgramParameter(p,gl.LINK_STATUS)) throw Error(gl.getProgramInfoLog(p));return p;
   }
   upload(mesh){
     const gl=this.gl,buffer=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,buffer);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(mesh.data),gl.STATIC_DRAW);
@@ -443,7 +427,7 @@ export class Renderer {
     this.syncCourse(race);
     const gl=this.gl,canvas=this.canvas,pixelRatio=Math.min(devicePixelRatio||1,1.7);
     const player=race.racers[0];
-    const lighting=courseLighting(player.x,player.z,this.lightMode,player,race.lightingCourse||race.course,race.worldTime);
+    const lighting=courseLighting(player.x,player.z,player,race.lightingCourse||race.course,race.worldTime);
     this.lighting=race.phase==='title'&&this.lightingReady?easeTitleLighting(this.lighting,lighting,dt):lighting;
     this.lightingReady=true;
     this.nightBlend=lerp(this.nightBlend,this.lighting.night,1-Math.exp(-dt*3));
@@ -453,10 +437,8 @@ export class Renderer {
     const p=race.racers[0],title=race.phase==='title';
     let target;
     if(title){
-      const view=titleCamera(race.worldTime);
-      this.eye=view.eye;target=view.target;this.cameraReady=false;
+      this.eye=TITLE_CAMERA.eye;target=TITLE_CAMERA.target;this.cameraReady=false;
     } else target=chaseCamera(this,p,dt);
-    this.cameraTarget=target;
     const camera=lookAt(this.eye,target);
     this.view=multiply(perspective(.99,width/height,.25,4000),camera);
     this.sunScreen=projectSkyDirection(this.view,this.lighting.sunDirection);
@@ -549,9 +531,9 @@ export class Renderer {
     gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE);gl.depthMask(false);
     this.drawMesh(this.beacon,modelMatrix(LIGHTHOUSE.x,lampY,LIGHTHOUSE.z,beaconAngle),-2);
     gl.depthMask(true);gl.disable(gl.BLEND);
-    this.drawSunFlare(width,height);
+    this.drawLensFlare(width,height);
   }
-  drawSunFlare(width,height){
+  drawLensFlare(width,height){
     const gl=this.gl,light=this.lighting;
     const strength=(1-this.nightBlend)*(1-clamp(-light.altitude*12,0,1))*(this.sunScreen?flareAlignment(this.sunScreen,width/height):0);
     if(strength<.001||width<10||height<10)return;
@@ -567,15 +549,10 @@ export class Renderer {
     const attr=gl.getAttribLocation(this.flareProgram,'aPosition');gl.enableVertexAttribArray(attr);gl.vertexAttribPointer(attr,2,gl.FLOAT,false,0,0);
     gl.uniform1i(gl.getUniformLocation(this.flareProgram,'uSource'),0);
     gl.uniform2f(gl.getUniformLocation(this.flareProgram,'uSun'),x,y);
-    for(const [name,value] of [['uAspect',width/height],['uStrength',strength],['uTwilight',light.twilight],['uNight',this.nightBlend]])gl.uniform1f(gl.getUniformLocation(this.flareProgram,name),value);
+    for(const [name,value] of [['uAspect',width/height],['uStrength',strength],['uTwilight',light.twilight]])gl.uniform1f(gl.getUniformLocation(this.flareProgram,name),value);
     gl.disable(gl.DEPTH_TEST);gl.depthMask(false);gl.enable(gl.BLEND);gl.blendFunc(gl.ONE,gl.ONE);
     gl.drawArrays(gl.TRIANGLES,0,3);
     gl.disableVertexAttribArray(attr);gl.disable(gl.BLEND);gl.depthMask(true);gl.enable(gl.DEPTH_TEST);
   }
-  project(x,y,z){
-    const m=this.view,w=m[3]*x+m[7]*y+m[11]*z+m[15];
-    if(w<=0)return null;
-    return {x:((m[0]*x+m[4]*y+m[8]*z+m[12])/w*.5+.5)*this.canvas.clientWidth,
-      y:(.5-(m[1]*x+m[5]*y+m[9]*z+m[13])/w*.5)*this.canvas.clientHeight};
-  }
+
 }
